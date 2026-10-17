@@ -1,0 +1,201 @@
+name: DevSecOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devsecops-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ----------------------------------------------------------------- testes
+  tests:
+    name: Testes + benchmark de precisão
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - run: pip install -r requirements-dev.txt
+      - name: Testes unitários e de integração
+        run: python -m pytest --junitxml=junit.xml
+      - name: Benchmark (precisão e recall mínimos de 90%)
+        run: python benchmark/run_benchmark.py --json benchmark.json --min-precision 0.9 --min-recall 0.9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: testes, path: "junit.xml\nbenchmark.json" }
+
+  # -------------------------------------------- SAST próprio (Security Gate)
+  sast:
+    name: SentinelaSAST
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload do SARIF para o GitHub Code Scanning
+      pull-requests: write     # comentário com o relatório no PR
+    env:
+      SAST_API_URL: ${{ secrets.SAST_API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - run: pip install tree-sitter==0.26.0 tree-sitter-javascript==0.25.0
+
+      - name: Baseline da branch principal (só achados NOVOS bloqueiam o PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add /tmp/base "origin/${{ github.base_ref }}"
+          if [ -d /tmp/base/sast_engine ]; then
+            python -m sast_engine scan /tmp/base --format json -o /tmp/baseline.json || true
+          fi
+
+      - name: Varredura + Security Gate
+        id: gate
+        run: |
+          BASELINE=""
+          [ -f /tmp/baseline.json ] && BASELINE="--baseline /tmp/baseline.json"
+          set +e
+          python -m sast_engine scan . --fail-on high --min-confidence medium $BASELINE \
+            --format json -o sast-report.json \
+            --also sarif=sast-report.sarif --also markdown=sast-report.md
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat sast-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar SARIF no Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: sast-report.sarif, category: sentinela-sast }
+
+      - name: Comentar relatório no PR
+        if: github.event_name == 'pull_request' && always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with: { header: sentinela-sast, path: sast-report.md }
+
+      - name: Enviar resultado para a plataforma (dashboard)
+        if: always() && env.SAST_API_URL != ''
+        env:
+          SAST_API_TOKEN: ${{ secrets.SAST_API_TOKEN }}
+        run: |
+          python - <<'EOF'
+          import json, os, urllib.request
+          data = json.load(open("sast-report.json"))
+          data["project"] = os.environ["GITHUB_REPOSITORY"]
+          data["ref"] = f'{os.environ["GITHUB_REF_NAME"]}@{os.environ["GITHUB_SHA"][:7]}'
+          req = urllib.request.Request(os.environ["SAST_API_URL"].rstrip("/") + "/api/v1/scans/ci",
+              data=json.dumps(data).encode(), method="POST",
+              headers={"Content-Type": "application/json", "X-API-Token": os.environ["SAST_API_TOKEN"]})
+          print(urllib.request.urlopen(req, timeout=30).status)
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: sast-report, path: "sast-report.*" }
+
+      - name: Aplicar decisão do gate
+        if: steps.gate.outputs.exit_code != '0'
+        run: |
+          echo "::error title=Security Gate::Vulnerabilidades HIGH/CRITICAL novas encontradas. Veja o relatório."
+          exit 1
+
+  # --------------------------------------------- prova de que o gate bloqueia
+  gate-demo:
+    name: Gate bloqueia código vulnerável
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: A aplicação vulnerável DEVE reprovar; a segura DEVE passar
+        run: |
+          if python -m sast_engine scan samples/vulnerable_app --fail-on high > /dev/null; then
+            echo "::error::O gate deveria ter reprovado samples/vulnerable_app"; exit 1
+          fi
+          python -m sast_engine scan samples/safe_app --fail-on high
+
+  # ------------------------------------------------------- motores externos
+  bandit:
+    name: Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: pip install bandit==1.9.4
+      - run: bandit -r sast_engine services benchmark scripts -ll
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    container: semgrep/semgrep:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Regras customizadas do grupo (bloqueante)
+        run: semgrep scan --config rules/semgrep --exclude samples --exclude tests --error --metrics=off
+      - name: Rulesets da comunidade (informativo, publicado no Code Scanning)
+        run: semgrep scan --config p/python --config p/secrets --exclude samples --exclude tests --sarif -o semgrep.sarif --metrics=off || true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: semgrep.sarif, category: semgrep }
+
+  dependencies:
+    name: SCA (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.txt --strict
+
+  container:
+    name: Imagem Docker + Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t sentinela-sast:${{ github.sha }} .
+      - name: Varredura de vulnerabilidades da imagem
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: sentinela-sast:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Smoke test do container
+        run: |
+          docker run -d --name api -p 8000:8000 -e DATABASE_URL=sqlite:////tmp/s.db -e CELERY_EAGER=1 sentinela-sast:${{ github.sha }}
+          for i in $(seq 1 20); do curl -sf localhost:8000/health && exit 0; sleep 2; done
+          docker logs api; exit 1
+
+  # ----------------------------------------- check único exigido no PR
+  security-gate:
+    name: Security Gate
+    if: always()
+    needs: [tests, sast, gate-demo, bandit, semgrep, dependencies, container]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consolidar resultados
+        run: |
+          echo '${{ toJSON(needs) }}' | python3 -c "
+          import json, sys
+          needs = json.load(sys.stdin)
+          rows = [f'| {k} | {v[\"result\"]} |' for k, v in needs.items()]
+          print('## Security Gate\n\n| Job | Resultado |\n|---|---|\n' + '\n'.join(rows))
+          " >> "$GITHUB_STEP_SUMMARY"
+      - name: Bloquear se algum controle falhou
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::Security Gate reprovado: corrija os controles com falha antes do merge."
+          exit 1

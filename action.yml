@@ -1,0 +1,42 @@
+# Action reutilizável: outros repositórios podem usar o SentinelaSAST como Security Gate.
+#   - uses: <org>/<este-repo>@main
+#     with: { path: ".", fail-on: "high" }
+name: SentinelaSAST Security Gate
+description: Análise estática de segurança (SAST) com taint analysis e Security Gate
+branding: { icon: shield, color: blue }
+
+inputs:
+  path:
+    description: Diretório a analisar
+    default: "."
+  fail-on:
+    description: Severidade mínima que reprova (CRITICAL, HIGH, MEDIUM, LOW)
+    default: "high"
+  upload-sarif:
+    description: Publicar resultado no GitHub Code Scanning
+    default: "true"
+
+outputs:
+  exit-code:
+    description: 0 = aprovado, 1 = reprovado
+    value: ${{ steps.scan.outputs.exit_code }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with: { python-version: "3.12" }
+    - id: scan
+      shell: bash
+      run: |
+        set +e
+        PYTHONPATH="${{ github.action_path }}" python -m sast_engine scan "${{ inputs.path }}" \
+          --fail-on "${{ inputs.fail-on }}" --format markdown -o sast-report.md --also sarif=sast-report.sarif
+        code=$?
+        cat sast-report.md >> "$GITHUB_STEP_SUMMARY"
+        echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+    - if: inputs.upload-sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with: { sarif_file: sast-report.sarif, category: sentinela-sast }
+    - shell: bash
+      run: exit ${{ steps.scan.outputs.exit_code }}

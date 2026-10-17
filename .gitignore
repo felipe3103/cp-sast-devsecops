@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+.env
+.pytest_cache/
+sast-report.*
+.DS_Store
+
+# Material do professor: "Proibido Reprodução" - não publicar
+*.pdf

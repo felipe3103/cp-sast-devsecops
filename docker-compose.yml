@@ -1,0 +1,71 @@
+# SentinelaSAST - arquitetura containerizada em microsserviços.
+#   docker compose up -d --build          -> sobe a plataforma (http://localhost:8000)
+#   docker compose --profile ai up -d     -> inclui o Ollama (LLM local)
+name: sentinela
+
+x-app: &app
+  build: .
+  image: sentinela-sast:latest
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://sentinela:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/sentinela
+    REDIS_URL: redis://redis:6379/0
+    OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"   # permite usar o Ollama nativo do host
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    ports: ["8000:8000"]
+
+  worker-scan:
+    <<: *app
+    command: celery -A app.worker.celery_app worker -Q scans -c 4 -n scan@%h --loglevel=info
+    healthcheck: { disable: true }
+
+  worker-ai:
+    <<: *app
+    command: celery -A app.worker.celery_app worker -Q ai -c 1 -n ai@%h --loglevel=info
+    healthcheck: { disable: true }
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sentinela
+      POSTGRES_USER: sentinela
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinela"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    volumes: [ollama:/root/.ollama]
+    ports: ["11434:11434"]
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    depends_on: [ollama]
+    environment: { OLLAMA_HOST: "http://ollama:11434" }
+    entrypoint: ["sh", "-c", "sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3}"]
+    restart: "no"
+
+volumes:
+  pgdata:
+  ollama:

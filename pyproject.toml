@@ -1,0 +1,20 @@
+[project]
+name = "sentinela-sast"
+version = "1.0.0"
+description = "Plataforma SAST com taint analysis, IA local e Security Gates"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+js = ["tree-sitter>=0.23", "tree-sitter-javascript>=0.23"]
+
+[project.scripts]
+sentinela = "sast_engine.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sast_engine*"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "services/api"]
+testpaths = ["tests"]
+addopts = "-q"

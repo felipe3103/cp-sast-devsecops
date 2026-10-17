@@ -1,0 +1,78 @@
+# Regras Semgrep customizadas do grupo (complementam o motor próprio).
+# Uso: semgrep scan --config rules/semgrep .
+rules:
+  - id: flask-taint-sqli
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: Entrada da requisição Flask chega a uma consulta SQL sem parametrização (SQL Injection).
+    metadata:
+      title: SQL Injection
+      cwe: ["CWE-89: SQL Injection"]
+      owasp: ["A03:2021 - Injection"]
+    pattern-sources:
+      - pattern-either:
+          - pattern: flask.request.$ATTR
+          - pattern: flask.request.$ATTR.get(...)
+    pattern-sanitizers:
+      - pattern-either:
+          - pattern: int(...)
+          - pattern: float(...)
+    pattern-sinks:
+      - patterns:
+          - pattern: $CUR.execute($QUERY, ...)
+          - focus-metavariable: $QUERY
+
+  - id: flask-taint-cmdi
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: Entrada da requisição Flask chega à execução de comando do sistema (Command Injection).
+    metadata:
+      title: Command Injection
+      cwe: ["CWE-78: OS Command Injection"]
+      owasp: ["A03:2021 - Injection"]
+    pattern-sources:
+      - pattern: flask.request.$ATTR
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: os.system(...)
+          - pattern: os.popen(...)
+          - pattern: subprocess.$F(..., shell=True, ...)
+
+  - id: flask-taint-ssrf
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: URL vinda da requisição é acessada pelo servidor (SSRF).
+    metadata:
+      title: Server-Side Request Forgery
+      cwe: ["CWE-918: Server-Side Request Forgery (SSRF)"]
+      owasp: ["A10:2021 - Server-Side Request Forgery"]
+    pattern-sources:
+      - pattern: flask.request.$ATTR
+    pattern-sinks:
+      - pattern-either:
+          - pattern: requests.$M($URL, ...)
+          - pattern: urllib.request.urlopen($URL, ...)
+
+  - id: hardcoded-password-default-arg
+    languages: [python]
+    severity: WARNING
+    message: Senha com valor padrão literal em parâmetro de função.
+    metadata:
+      title: Credencial hardcoded em parâmetro
+      cwe: ["CWE-798: Use of Hard-coded Credentials"]
+      owasp: ["A07:2021 - Identification and Authentication Failures"]
+    patterns:
+      - pattern: |
+          def $F(..., $P="$V", ...):
+            ...
+      - metavariable-regex:
+          metavariable: $P
+          regex: (?i)(pass(word)?|senha|secret|token|api_?key)
+      - metavariable-regex:
+          metavariable: $V
+          regex: ^(?!changeme$|$).{6,}$

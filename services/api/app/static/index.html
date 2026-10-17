@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SentinelaSAST · Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◆</span> SentinelaSAST <small>Dashboard executivo</small></div>
+  <div class="controls">
+    <label>Projeto
+      <select id="project-filter"><option value="">Todos</option></select>
+    </label>
+    <span id="ai-badge" class="badge muted">IA: verificando…</span>
+    <button id="theme-toggle" class="ghost" title="Alternar tema">◐</button>
+  </div>
+</header>
+
+<main>
+  <section class="kpis" id="kpis" aria-label="Indicadores"></section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Severidade dos achados abertos</h2>
+      <div id="chart-severity" class="chart"></div>
+    </article>
+    <article class="card wide">
+      <h2>Tendência de falhas por varredura</h2>
+      <div id="chart-trend" class="chart"></div>
+    </article>
+    <article class="card">
+      <h2>Top 5 arquivos críticos</h2>
+      <div id="chart-files" class="chart"></div>
+    </article>
+    <article class="card">
+      <h2>OWASP Top 10 (2021)</h2>
+      <div id="chart-owasp" class="chart"></div>
+    </article>
+    <article class="card">
+      <h2>Nova varredura</h2>
+      <form id="form-upload" class="stack">
+        <input type="text" name="project" placeholder="Nome do projeto" required>
+        <input type="file" name="file" accept=".zip,.py,.js" required>
+        <button type="submit">Enviar .zip / .py / .js</button>
+      </form>
+      <form id="form-git" class="stack">
+        <input type="url" name="repo_url" placeholder="https://github.com/dono/repo (público)" required>
+        <button type="submit" class="secondary">Analisar repositório</button>
+      </form>
+      <p id="scan-msg" class="hint"></p>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <h2>Achados <span id="scan-label" class="muted"></span></h2>
+      <div class="row gap">
+        <select id="scan-select" aria-label="Varredura"></select>
+        <select id="sev-filter" aria-label="Severidade">
+          <option value="">Todas severidades</option>
+          <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option>
+        </select>
+        <select id="status-filter" aria-label="Status">
+          <option value="open">Abertos</option>
+          <option value="">Todos status</option>
+          <option value="false_positive">Falsos positivos</option>
+          <option value="accepted_risk">Risco aceito</option>
+          <option value="fixed">Corrigidos</option>
+        </select>
+        <button id="btn-ai-all" class="secondary">Triagem IA (top 15)</button>
+        <a id="btn-sarif" class="button ghost" href="#">SARIF</a>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="findings">
+        <thead><tr><th>Sev.</th><th>Regra</th><th>Arquivo:linha</th><th>Descrição</th><th>Risco</th><th>IA</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<aside id="drawer" class="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <h2 id="d-title"></h2>
+    <button id="d-close" class="ghost" aria-label="Fechar">✕</button>
+  </div>
+  <div id="d-body"></div>
+</aside>
+
+<div id="tooltip" class="tooltip" role="status"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

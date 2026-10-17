@@ -1,0 +1,10 @@
+# Configuração do SentinelaSAST para ESTE repositório.
+
+# Amostras intencionalmente vulneráveis e testes não fazem parte do produto.
+exclude = ["samples", "tests", "benchmark/fixtures"]
+
+# Exceções de risco aceito: toda exceção precisa de justificativa (reason) e é revisada no PR.
+[[ignore]]
+path = "services/api/app/static/app.js"
+rules = ["JS002"]
+reason = "Todo conteúdo dinâmico inserido via innerHTML passa pela função esc() (escape de HTML); revisado manualmente."
