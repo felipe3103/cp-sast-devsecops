@@ -17,12 +17,12 @@ O SentinelaSAST é uma plataforma de **Static Application Security Testing** que
 | Regras determinísticas e heurísticas | 18 regras Python + 5 JS, mapeadas para CWE e OWASP 2021 | `sast_engine/rules/` |
 | **CP1 — 3 violações iniciais** | `PY001` senha/segredo hardcoded, `PY002` `eval`/`exec`, `PY003` execução de comando via shell | `sast_engine/rules/python_rules.py` |
 | **CP2 — Taint analysis** | Interprocedural (inclusive **entre arquivos**), sensível ao fluxo, com sanitizadores, guardas e trace fonte→sink | `sast_engine/taint.py` |
-| **CP2 — IA (LLM local)** | Ollama/Llama 3 classifica severidade, reduz falsos positivos e gera correção **validada em ciclo fechado** | `sast_engine/ai/` |
+| **CP2 — IA (LLM local)** | Ollama/Llama 3 classifica severidade, reduz falsos positivos e gera correção **aplicada e re-escaneada no projeto inteiro**, com autocorreção guiada pelo validador | `sast_engine/ai/` |
 | Integração com Bandit/Semgrep | Resultados normalizados e deduplicados com o motor próprio | `sast_engine/integrations.py`, `rules/semgrep/` |
 | Microsserviços + processamento assíncrono | FastAPI + Celery (filas `scans` e `ai`) + Redis + PostgreSQL + Ollama, via Docker Compose | `services/api/`, `docker-compose.yml` |
 | **CP3 — Security Gates em CI/CD** | Pipeline com 7 controles e check único "Security Gate"; baseline para bloquear só achados **novos** | `.github/workflows/devsecops.yml`, `action.yml` |
 | **CP3 — Dashboard executivo** | Severidade, tendência, top 5 arquivos críticos, OWASP, KPIs, drill-down com código, fluxo e IA | `services/api/app/static/` |
-| Testes contínuos | 75 testes (regras, taint, IA, gate, API) + benchmark de precisão/recall no CI | `tests/`, `benchmark/` |
+| Testes contínuos | 80 testes (regras, taint, IA, gate, API) + benchmark de precisão/recall no CI | `tests/`, `benchmark/` |
 
 ### Resultados medidos
 
@@ -50,6 +50,11 @@ docker compose --profile ai up -d # (opcional) + Ollama baixando o llama3 (~4,7 
 python scripts/seed_demo.py       # popula o dashboard com 5 varreduras de exemplo
 ```
 
+> **Máquina com pouca RAM (ex.: Mac com 8 GB)?** Rode o Ollama nativo (usa a GPU) em vez do container:
+> `brew install ollama && brew services start ollama && ollama pull llama3.2:3b`, e no `.env` defina
+> `OLLAMA_MODEL=llama3.2:3b` e `OLLAMA_URL=http://host.docker.internal:11434`. No macOS sem Docker Desktop:
+> `brew install colima docker docker-compose && colima start --memory 3`.
+
 - Dashboard: <http://localhost:8000>
 - API / Swagger: <http://localhost:8000/docs>
 
@@ -70,7 +75,7 @@ python -m sast_engine rules                                       # catálogo de
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-make test        # 75 testes
+make test        # 80 testes
 make benchmark   # precisão / recall / ablação
 make gate        # mesmo Security Gate do CI, no próprio repositório
 ```
@@ -96,6 +101,12 @@ docs/                     documentação técnica e roteiro da defesa
 .github/workflows/        pipeline DevSecOps
 action.yml                GitHub Action reutilizável do Security Gate
 ```
+
+## Evidências no GitHub
+
+- Pipeline DevSecOps: aba **Actions**. Todos os controles verdes na `main`.
+- Proteção da branch `main`: merge exige o check **Security Gate**.
+- **PR #1 (demo):** adiciona uma rota com Command Injection. O SentinelaSAST detecta o fluxo `host → os.popen` (CRITICAL), comenta o relatório no PR, publica o alerta no **Code Scanning** e o merge fica **bloqueado**.
 
 ## Documentação
 
