@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser("scan", help="analisa um diretório ou arquivo")
     scan.add_argument("path", nargs="?", default=".")
-    scan.add_argument("--format", choices=["text", "json", "sarif", "markdown"], default="text")
+    scan.add_argument("--format", choices=["text", "json", "sarif", "markdown", "gitlab"], default="text")
     scan.add_argument("-o", "--output", help="arquivo de saída (padrão: stdout)")
     scan.add_argument("--also", action="append", default=[], metavar="FORMATO=ARQUIVO",
                       help="gera relatórios extras, ex.: --also sarif=sast.sarif --also markdown=sast.md")
@@ -47,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--bandit", action="store_true", help="incorpora resultados do Bandit")
     scan.add_argument("--semgrep", action="store_true", help="incorpora resultados do Semgrep")
     scan.add_argument("--ai", action="store_true", help="triagem e remediação com LLM local (Ollama)")
+    scan.add_argument("--ai-semantic", action="store_true",
+                      help="varredura semântica: o LLM procura falhas de lógica que as regras não pegam")
     scan.add_argument("--ai-limit", type=int, default=20, help="máximo de achados enviados à IA")
     scan.add_argument("--upload", metavar="URL", help="envia o resultado para a API da plataforma")
     scan.add_argument("--project", default=None, help="nome do projeto ao enviar para a API")
@@ -73,6 +75,20 @@ def _ai_enrich(result, root: Path, limit: int) -> None:
             finding.extra["ai_suppressed"] = True
         if analysis.source == "llm":
             finding.severity = Severity.parse(analysis.severity)
+
+
+def _ai_semantic(result, root: Path) -> None:
+    from .ai import AITriage
+    from .scanner import ScanConfig, collect_files, deduplicate
+
+    triage = AITriage()
+    known = list(result.findings)
+    config = ScanConfig.load(root if root.is_dir() else root.parent)
+    for path, source in collect_files(root, config).items():
+        language = "python" if path.endswith(".py") else "javascript"
+        print(f"… varredura semântica: {path}", file=sys.stderr)
+        result.findings.extend(triage.semantic_review(path, source, language, known))
+    result.findings = deduplicate(result.findings)
 
 
 def _upload(url: str, payload: dict) -> None:
@@ -110,6 +126,8 @@ def cmd_scan(args) -> int:
     base = root if root.is_dir() else root.parent
     if args.ai:
         _ai_enrich(result, base, args.ai_limit)
+    if args.ai_semantic:
+        _ai_semantic(result, root)
 
     gate = None
     if args.fail_on:
@@ -126,6 +144,7 @@ def cmd_scan(args) -> int:
         "json": lambda: reporters.to_json(result, gate),
         "sarif": lambda: reporters.to_sarif(result),
         "markdown": lambda: reporters.to_markdown(result, gate),
+        "gitlab": lambda: reporters.to_gitlab_sast(result),
     }
     output = render[args.format]()
     if args.output:

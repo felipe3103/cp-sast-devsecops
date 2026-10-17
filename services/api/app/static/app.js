@@ -59,24 +59,49 @@ function legend(container, keys) {
   container.appendChild(div);
 }
 
-// --------------------------------------------------- gráfico: severidade
+// --------------------------------------------------- gráfico: severidade (rosca)
 function chartSeverity(data) {
   const box = $("#chart-severity");
   const total = SEVS.reduce((a, s) => a + (data[s] || 0), 0);
   if (!total) { box.innerHTML = '<div class="empty">Nenhum achado aberto 🎉</div>'; return; }
-  const W = 360, rowH = 30, labelW = 64, H = SEVS.length * rowH;
-  const max = Math.max(...SEVS.map((s) => data[s] || 0));
-  const svg = svgRoot(box, W, H);
-  SEVS.forEach((s, i) => {
-    const v = data[s] || 0, y = i * rowH + 6, bw = v ? Math.max(3, (v / max) * (W - labelW - 70)) : 0;
-    const t = el("text", { x: 0, y: y + 13 }, svg); t.textContent = SEV_LABEL[s];
-    if (bw) el("path", { d: barPath(labelW, y, bw, 18, true), fill: css(SEV_VAR[s]) }, svg);
-    const vl = el("text", { x: labelW + bw + 6, y: y + 13, class: "value-label" }, svg);
-    vl.textContent = `${v} · ${Math.round((v / total) * 100)}%`;
-    const hit = el("rect", { x: 0, y: i * rowH, width: W, height: rowH, fill: "transparent" }, svg);
-    hit.addEventListener("mousemove", (e) => showTip(e, `<b>Severidade ${SEV_LABEL[s]}</b><div class="tt-row"><span>Achados</span><span>${v}</span></div><div class="tt-row"><span>Participação</span><span>${((v / total) * 100).toFixed(1)}%</span></div>`));
-    hit.addEventListener("mouseleave", hideTip);
+  box.innerHTML = '<div class="donut-wrap"></div>';
+  const wrap = box.firstChild;
+  const S = 180, R = 80, r = 52, cx = S / 2, cy = S / 2;
+  const svg = el("svg", { viewBox: `0 0 ${S} ${S}`, role: "img", "aria-label": "Distribuição por severidade" }, wrap);
+  let angle = -Math.PI / 2;
+  const present = SEVS.filter((s) => data[s]);
+  const gap = present.length > 1 ? 0.025 : 0; // 2px de superfície entre fatias
+  present.forEach((s) => {
+    const v = data[s], sweep = (v / total) * Math.PI * 2;
+    const a0 = angle + gap / 2, a1 = angle + sweep - gap / 2;
+    angle += sweep;
+    const pt = (rad, a) => `${cx + rad * Math.cos(a)},${cy + rad * Math.sin(a)}`;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const d = present.length === 1
+      ? `M${cx},${cy - R} A${R},${R} 0 1 1 ${cx - 0.01},${cy - R} L${cx - 0.01},${cy - r} A${r},${r} 0 1 0 ${cx},${cy - r} Z`
+      : `M${pt(R, a0)} A${R},${R} 0 ${large} 1 ${pt(R, a1)} L${pt(r, a1)} A${r},${r} 0 ${large} 0 ${pt(r, a0)} Z`;
+    const slice = el("path", { d, fill: css(SEV_VAR[s]) }, svg);
+    slice.addEventListener("mousemove", (e) => showTip(e, `<b>Severidade ${SEV_LABEL[s]}</b><div class="tt-row"><span>Achados</span><span>${v}</span></div><div class="tt-row"><span>Participação</span><span>${((v / total) * 100).toFixed(1)}%</span></div>`));
+    slice.addEventListener("mouseleave", hideTip);
   });
+  const t = el("text", { x: cx, y: cy + 4, "text-anchor": "middle", class: "donut-total" }, svg); t.textContent = total;
+  const t2 = el("text", { x: cx, y: cy + 22, "text-anchor": "middle" }, svg); t2.textContent = "achados";
+  const leg = document.createElement("div");
+  leg.className = "donut-legend";
+  leg.innerHTML = SEVS.map((s) => `<div><i style="background: var(${SEV_VAR[s]})"></i>${SEV_LABEL[s]} <b>${Math.round(((data[s] || 0) / total) * 100)}%</b> · ${data[s] || 0}</div>`).join("");
+  wrap.appendChild(leg);
+}
+
+// --------------------------------------------------- falhas detectadas (CVEs)
+function renderCves(items) {
+  const box = $("#cve-list");
+  if (!items.length) { box.innerHTML = '<div class="empty">Nenhuma falha aberta com caso real de referência.</div>'; return; }
+  box.innerHTML = items.map((c) => `
+    <div class="cve">
+      <div class="id"><a href="https://nvd.nist.gov/vuln/detail/${esc(c.cve)}" target="_blank" rel="noopener noreferrer">${esc(c.cve)}</a><div class="muted">${esc(c.cwe)}</div></div>
+      <div><div class="t">${esc(c.title)}</div><div class="d">${esc(c.description)}</div></div>
+      <span class="badge">${c.findings} no seu código</span>
+    </div>`).join("");
 }
 
 // ------------------------------------------------------ gráfico: tendência
@@ -182,6 +207,7 @@ async function loadMetrics() {
   const m = await api(`/api/v1/metrics${state.project ? `?project=${encodeURIComponent(state.project)}` : ""}`);
   renderKpis(m.kpis);
   chartSeverity(m.severity);
+  renderCves(m.reference_cves || []);
   chartTrend(m.trend);
   chartHBar($("#chart-files"), m.top_files.map((f) => ({ ...f, label: f.file, onClick: () => filterFile(f.file) })), { stacked: true });
   chartHBar($("#chart-owasp"), m.owasp.map(([label, total]) => ({ label: label.replace(":2021", ""), total })), { stacked: false, labelW: 210, maxChars: 32, cutStart: false, color: css("--accent") });
@@ -256,6 +282,10 @@ async function openFinding(id) {
       f.trace.map((s) => `<li><code>${s.file && s.file !== f.file ? esc(s.file) + ":" : "L"}${s.line}</code> ${esc(s.description)}</li>`).join("") + "</ol>";
   }
   html += `<h3>Remediação recomendada</h3><p>${esc(f.remediation)}</p>`;
+  if (f.reference_cves && f.reference_cves.length) {
+    html += "<h3>Caso real desta classe de falha</h3>" + f.reference_cves.map((c) =>
+      `<p><a href="https://nvd.nist.gov/vuln/detail/${esc(c.cve)}" target="_blank" rel="noopener noreferrer"><b>${esc(c.cve)}</b></a> · ${esc(c.title)}<br><span class="muted">${esc(c.description)}</span></p>`).join("");
+  }
   html += `<h3>Análise por IA</h3><div id="ai-panel">${renderAI(f.ai)}</div>
     <div class="row gap" style="justify-content:flex-start;margin-top:10px">
       <button id="btn-ai-one">${f.ai ? "Reanalisar" : "Analisar"} com IA</button>
@@ -313,6 +343,22 @@ $("#btn-ai-all").onclick = async () => {
   alertMsg(`${r.queued} achado(s) enviados para triagem por IA.`);
   loadFindings();
 };
+
+$("#btn-semantic").onclick = async (e) => {
+  if (!state.scanId) return;
+  e.target.disabled = true;
+  try {
+    await api(`/api/v1/scans/${state.scanId}/semantic`, { method: "POST" });
+    alertMsg("Varredura semântica enfileirada: o LLM local está lendo o código (pode levar alguns minutos). Achados aparecem como AI-SEMANTIC.");
+    pollSemantic(state.scanId, 0);
+  } finally { e.target.disabled = false; }
+};
+async function pollSemantic(scanId, tries) {
+  const s = await api(`/api/v1/scans/${scanId}`);
+  if (s.semantic_status === "running" && tries < 120) { setTimeout(() => pollSemantic(scanId, tries + 1), 5000); return; }
+  if (s.semantic_status === "done") alertMsg(`Varredura semântica concluída: ${s.semantic_found} falha(s) de lógica nova(s).`);
+  loadMetrics();
+}
 
 function alertMsg(text) { $("#scan-msg").textContent = text; }
 

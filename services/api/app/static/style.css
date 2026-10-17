@@ -140,3 +140,18 @@ ol.trace li { margin: 3px 0; }
 .tooltip.show { opacity: 1; }
 .tooltip b { display: block; margin-bottom: 4px; }
 .tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; }
+
+.cve-list { display: grid; gap: 10px; }
+.cve { display: grid; grid-template-columns: 150px 1fr auto; gap: 12px; align-items: start; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.cve .id { font-weight: 700; font-variant-numeric: tabular-nums; }
+.cve .id a { color: var(--accent); text-decoration: none; }
+.cve .t { font-weight: 600; }
+.cve .d { color: var(--text-secondary); font-size: 13px; }
+@media (max-width: 700px) { .cve { grid-template-columns: 1fr; } }
+.donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.donut-wrap svg { width: 180px; flex: none; }
+.donut-legend { display: grid; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+.donut-legend b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.donut-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; }
+.chart .donut-total { fill: var(--text-primary); font-size: 26px; font-weight: 700; }

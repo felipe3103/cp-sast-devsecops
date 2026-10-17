@@ -63,7 +63,8 @@ services:
     profiles: ["ai"]
     depends_on: [ollama]
     environment: { OLLAMA_HOST: "http://ollama:11434" }
-    entrypoint: ["sh", "-c", "sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3}"]
+    # baixa o LLM e o modelo de embeddings do Hugging Face Hub (usado no RAG)
+    entrypoint: ["sh", "-c", "sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3} && ollama pull ${EMBED_MODEL:-hf.co/nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0}"]
     restart: "no"
 
 volumes:

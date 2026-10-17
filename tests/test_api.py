@@ -89,3 +89,23 @@ def test_ci_ingestion_requires_token(client):
 def test_rules_endpoint(client):
     ids = {r["id"] for r in client.get("/api/v1/rules").json()}
     assert {"PY001", "PY002", "PY003", "TAINT-SQLI"} <= ids
+
+
+def test_metrics_include_reference_cves_and_semantic_status(client):
+    r = client.post("/api/v1/scans/snippet", json={
+        "code": "from flask import request\nimport sqlite3\ndef f():\n    sqlite3.connect('x').execute('SELECT ' + request.args['q'])\n",
+        "project": "cve"})
+    scan = client.get(f"/api/v1/scans/{r.json()['id']}").json()
+    assert scan["semantic_status"] == "none"
+    m = client.get("/api/v1/metrics", params={"project": "cve"}).json()
+    assert any(c["cve"] == "CVE-2014-3704" and c["findings"] >= 1 for c in m["reference_cves"])
+    fid = client.get(f"/api/v1/scans/{scan['id']}/findings").json()[0]["id"]
+    assert client.get(f"/api/v1/findings/{fid}").json()["reference_cves"][0]["cve"] == "CVE-2014-3704"
+
+
+def test_semantic_endpoint_marks_done_without_llm(client):
+    r = client.post("/api/v1/scans/snippet", json={"code": "x = 1\n", "project": "sem"})
+    sid = r.json()["id"]
+    assert client.post(f"/api/v1/scans/{sid}/semantic").status_code == 202
+    scan = client.get(f"/api/v1/scans/{sid}").json()
+    assert scan["semantic_status"] == "done" and scan["semantic_found"] == 0

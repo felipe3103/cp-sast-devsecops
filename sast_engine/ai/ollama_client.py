@@ -64,3 +64,41 @@ class OllamaClient:
             return json.loads(content)
         except json.JSONDecodeError as exc:
             raise LLMUnavailable(f"Resposta não é JSON válido: {content[:200]}") from exc
+
+
+class LangChainOllamaClient(OllamaClient):
+    """Mesmo contrato do OllamaClient, mas a chamada passa por uma chain LangChain:
+    ChatPromptTemplate -> ChatOllama (saída restrita pelo JSON Schema) -> JsonOutputParser."""
+
+    def chat_json(self, system: str, user: str, schema: dict | None = None) -> dict:
+        try:
+            from langchain_core.output_parsers import JsonOutputParser
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_ollama import ChatOllama
+        except ImportError:  # LangChain não instalado: usa a chamada HTTP direta
+            return super().chat_json(system, user, schema)
+        llm = ChatOllama(
+            model=self.model, base_url=self.base_url, temperature=0.1, num_ctx=8192,
+            format=schema or "json", client_kwargs={"timeout": self.timeout},
+        )
+        prompt = ChatPromptTemplate.from_messages([("system", "{system}"), ("human", "{user}")])
+        chain = prompt | llm | JsonOutputParser()
+        try:
+            result = chain.invoke({"system": system, "user": user})
+        except Exception as exc:
+            raise LLMUnavailable(f"LangChain/Ollama: {exc}") from exc
+        if not isinstance(result, dict):
+            raise LLMUnavailable("resposta do LLM não é um objeto JSON")
+        return result
+
+
+def default_client() -> OllamaClient:
+    """AI_BACKEND=langchain (padrão) usa a chain LangChain; AI_BACKEND=http usa a API direta."""
+    if os.getenv("AI_BACKEND", "langchain") == "langchain":
+        try:
+            import langchain_ollama  # noqa: F401
+
+            return LangChainOllamaClient()
+        except ImportError:
+            pass
+    return OllamaClient()

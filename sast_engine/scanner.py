@@ -30,6 +30,7 @@ SUPPRESS_RE = re.compile(r"#\s*nosast(?::\s*([\w\-, ]+))?|//\s*nosast(?::\s*([\w
 # Quando a taint analysis confirma o fluxo, o achado heurístico da mesma linha é redundante.
 SUPERSEDED_BY_TAINT = {
     "PY005": "TAINT-SQLI", "PY002": "TAINT-CODE", "PY003": "TAINT-CMDI", "PY004": "TAINT-DESER",
+    "JS001": "TAINT-CODE", "JS002": "TAINT-XSS", "JS004": "TAINT-CMDI", "JS005": "TAINT-SQLI",
 }
 
 
@@ -170,6 +171,8 @@ def scan_sources(files: dict[str, str], config: ScanConfig | None = None, root: 
             findings.extend(run_python_rules(module, config.disabled_rules))
         elif lang == "javascript" and javascript_ts.available():
             findings.extend(javascript_ts.scan_javascript(path, source))
+            if config.taint:
+                findings.extend(f for f in javascript_ts.taint_javascript(path, source) if f.rule_id not in config.disabled_rules)
 
     if config.taint and modules:
         findings.extend(f for f in TaintEngine(modules).run() if f.rule_id not in config.disabled_rules)

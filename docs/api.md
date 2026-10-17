@@ -27,13 +27,15 @@ Swagger interativo em `http://localhost:8000/docs`.
 ## Dashboard
 
 - **KPIs:** achados abertos, críticos, altos, risco acumulado, projetos reprovados no gate, achados triados pela IA, falsos positivos descartados e novos × corrigidos em relação à varredura anterior.
-- **Severidade:** barras com contagem e percentual (a cor sempre vem acompanhada do rótulo).
+- **Severidade:** gráfico de rosca com percentual por severidade e legenda com contagem (a cor sempre vem acompanhada do rótulo).
 - **Tendência:** barras empilhadas por varredura (clique numa barra para abrir aquela varredura); o tooltip mostra o resultado do gate.
 - **Top 5 arquivos críticos:** barras empilhadas por severidade (clique filtra a tabela por arquivo).
 - **OWASP Top 10:** distribuição por categoria.
+- **Falhas detectadas:** CVEs reais da mesma CWE das falhas abertas (CVE-2014-3704 Drupalgeddon, CVE-2020-11022 jQuery, CVE-2020-13379 Grafana, CVE-2021-41773 Apache...), com quantos achados do código pertencem a cada classe e link para o NVD. O painel do achado também mostra o caso real correspondente.
+- **Varredura semântica (IA):** botão que enfileira a análise de falhas de lógica pelo LLM; o status aparece na varredura (`semantic_status`).
 - **Tabela de achados:** filtro por varredura, severidade e status. Ao clicar num achado abre um painel com código (linha destacada), fluxo de taint passo a passo, remediação, análise da IA (veredito, cenário de exploração, correção validada) e alteração de status.
 - Tema claro/escuro (segue o sistema, com alternância manual), sem dependências externas: os gráficos são SVG gerados pelo próprio `app.js`.
 
 ## Modelo de dados
 
-`projects (1) ─ (N) scans (1) ─ (N) findings`, mais `scans (1) ─ (N) scan_files`, que guarda só os arquivos com achados (contexto para a IA e o painel).
+`projects (1) ─ (N) scans (1) ─ (N) findings`, mais `scans (1) ─ (N) scan_files`, que guarda os arquivos analisados (contexto da IA, validação de correções no projeto e varredura semântica). Colunas novas são adicionadas automaticamente em bancos existentes (migração leve em `init_db`).

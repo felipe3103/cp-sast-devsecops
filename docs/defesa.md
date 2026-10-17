@@ -1,5 +1,7 @@
 # Roteiro da defesa técnica (≈ 15 min + perguntas)
 
+**Slides:** https://claude.ai/artifact/3JM6CUphSCjJVh2b44DhVt (12 slides com notas do apresentador; exporta para PDF/PPTX pelo menu Share › Export). O link é privado até ser compartilhado pelo menu Share.
+
 Os pesos da avaliação guiam o tempo: Arquitetura 25% · **Robustez SAST 30%** · Inovação IA 20% · DevSecOps 15% · Defesa 10%.
 
 ## Divisão sugerida (4–5 integrantes)
@@ -35,7 +37,8 @@ python -m sast_engine scan samples/vulnerable_app --fail-on high; echo "exit=$?"
 ```
 
 5. **Dashboard** (<http://localhost:8000>): KPIs → tendência caindo ao longo das sprints → clicar no top arquivo → abrir `TAINT-SQLI db.py:18` → mostrar o fluxo → **"Analisar com IA"** → mostrar o veredito e a correção validada.
-6. **GitHub:** mostrar o **PR #1** (já aberto): o check *Security Gate* vermelho, o comentário do relatório, o alerta `TAINT-CMDI` no Code Scanning e o botão de merge bloqueado.
+6. **Varredura semântica:** no dashboard, varredura #1 → botão *Varredura semântica (IA)* → achados `AI-SEMANTIC` em `pedidos.py` (IDOR, falta de autenticação), sem nenhuma regra ter disparado ali.
+7. **GitHub:** mostrar o **PR #1** (já aberto): o check *Security Gate* vermelho, o comentário do relatório, o alerta `TAINT-CMDI` no Code Scanning e o botão de merge bloqueado.
 
 > Plano B: se o Ollama estiver lento na hora, a triagem cai para a base de conhecimento e o fluxo continua. Vale mostrar isso também, porque é o guardrail 1.
 

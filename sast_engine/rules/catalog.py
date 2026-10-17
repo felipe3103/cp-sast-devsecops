@@ -270,3 +270,72 @@ CATALOG: dict[str, RuleMeta] = {r.id: r for r in _RULES}
 
 def get_rule(rule_id: str) -> RuleMeta | None:
     return CATALOG.get(rule_id)
+
+
+# ------------------------------------------------------------------------------------
+# CVEs de referência: incidentes reais da mesma classe (CWE) de cada achado. Mostram no
+# dashboard o impacto concreto do tipo de falha encontrado ("Falhas detectadas" do PDF).
+# Os quatro primeiros são os exemplos citados no enunciado do projeto.
+@dataclass(frozen=True)
+class ReferenceCVE:
+    cve: str
+    title: str
+    description: str
+
+
+REFERENCE_CVES: dict[str, list[ReferenceCVE]] = {
+    "CWE-89": [ReferenceCVE(
+        "CVE-2014-3704", "SQL Injection (SQLi) - \"Drupalgeddon\"",
+        "Falha no Drupal 7 que permitia a atacantes não autenticados enviar comandos SQL "
+        "maliciosos, resultando no controle total do banco de dados.")],
+    "CWE-79": [ReferenceCVE(
+        "CVE-2020-11022", "Cross-Site Scripting (XSS) - jQuery",
+        "Falha no jQuery que permitia a execução de scripts maliciosos no navegador do usuário "
+        "ao processar elementos HTML de fontes não confiáveis.")],
+    "CWE-918": [ReferenceCVE(
+        "CVE-2020-13379", "Server-Side Request Forgery (SSRF) - Grafana",
+        "Falha no Grafana que permitia a um atacante forçar o servidor a fazer requisições para a "
+        "rede interna, expondo serviços protegidos.")],
+    "CWE-22": [ReferenceCVE(
+        "CVE-2021-41773", "Broken Access Control / Path Traversal - Apache HTTP Server",
+        "Falha de path traversal no Apache 2.4.49 que permitia acessar arquivos sensíveis fora da "
+        "pasta raiz do servidor web.")],
+    "CWE-78": [ReferenceCVE(
+        "CVE-2014-6271", "Command Injection - \"Shellshock\" (Bash)",
+        "Variáveis de ambiente com definições de função faziam o Bash executar comandos arbitrários; "
+        "explorado em massa via CGI de servidores web.")],
+    "CWE-94": [ReferenceCVE(
+        "CVE-2022-22965", "Code Injection - \"Spring4Shell\"",
+        "Data binding do Spring Framework permitia a um atacante remoto gravar um arquivo JSP e "
+        "executar código no servidor.")],
+    "CWE-95": [ReferenceCVE(
+        "CVE-2022-22965", "Code Injection - \"Spring4Shell\"",
+        "Data binding do Spring Framework permitia a um atacante remoto gravar um arquivo JSP e "
+        "executar código no servidor.")],
+    "CWE-502": [
+        ReferenceCVE(
+            "CVE-2017-18342", "Desserialização insegura - PyYAML yaml.load",
+            "Em versões do PyYAML anteriores à 5.1, yaml.load() sem Loader seguro executava código "
+            "Python arbitrário embutido no YAML."),
+        ReferenceCVE(
+            "CVE-2015-4852", "Desserialização insegura - Oracle WebLogic",
+            "Objetos Java serializados (Apache Commons Collections) enviados ao WebLogic permitiam "
+            "execução remota de código sem autenticação."),
+    ],
+    "CWE-798": [ReferenceCVE(
+        "CVE-2020-29583", "Credencial hardcoded - firewalls Zyxel",
+        "Conta administrativa com senha fixa no firmware permitia a qualquer pessoa acessar SSH e "
+        "a interface web dos equipamentos.")],
+    "CWE-295": [ReferenceCVE(
+        "CVE-2014-1266", "Validação de certificado TLS falha - Apple \"goto fail\"",
+        "Um 'goto fail' duplicado no SecureTransport pulava a verificação da assinatura, permitindo "
+        "ataques man-in-the-middle em conexões TLS.")],
+    "CWE-347": [ReferenceCVE(
+        "CVE-2015-9235", "Verificação de assinatura JWT - jsonwebtoken (Node.js)",
+        "A biblioteca aceitava tokens assinados com algoritmo diferente do esperado, permitindo "
+        "forjar tokens válidos.")],
+}
+
+
+def reference_cves(cwe: str) -> list[ReferenceCVE]:
+    return REFERENCE_CVES.get(cwe, [])

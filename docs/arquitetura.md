@@ -24,7 +24,7 @@ flowchart TB
         wa["<b>worker-ai</b><br/>Celery · fila <i>ai</i><br/>triagem por LLM"]
         redis[("<b>redis</b><br/>broker + resultados")]
         pg[("<b>postgres</b><br/>projetos, scans,<br/>achados, arquivos")]
-        ollama["<b>ollama</b><br/>Llama 3 local<br/>:11434"]
+        ollama["<b>ollama</b><br/>Llama 3 local + embeddings<br/>(Hugging Face Hub)<br/>:11434"]
     end
     user([Navegador / CLI / GitHub Actions]) -->|HTTP/JSON| api
     api -->|enfileira| redis
@@ -33,7 +33,7 @@ flowchart TB
     ws --> pg
     wa --> pg
     api --> pg
-    wa -->|/api/chat JSON schema| ollama
+    wa -->|LangChain: ChatOllama + RAG<br/>InMemoryVectorStore| ollama
     ci[GitHub Actions<br/>CLI sast_engine] -->|POST /api/v1/scans/ci<br/>X-API-Token| api
 ```
 
@@ -55,12 +55,12 @@ flowchart LR
     col --> js[javascript_ts<br/>Tree-sitter]
     py --> rules[Regras PY001..PY018<br/>1 passada na AST]
     py --> taint[TaintEngine<br/>resumos de função · ponto fixo]
-    js --> jsr[Regras JS001..JS005]
+    js --> jsr[Regras JS001..JS005<br/>+ taint JS]
     ext[Bandit / Semgrep<br/>opcionais] --> dedup
     rules --> dedup[Supressões · deduplicação<br/>taint &gt; heurística]
     taint --> dedup
     jsr --> dedup
-    dedup --> ai[AITriage opcional<br/>guardrails + validação da correção]
+    dedup --> ai[AITriage opcional<br/>RAG LangChain · guardrails ·<br/>correção validada no projeto]
     ai --> gate[gate.evaluate<br/>severidade · confiança · baseline]
     gate --> rep[reporters<br/>texto · JSON · SARIF · Markdown]
 ```

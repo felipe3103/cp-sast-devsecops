@@ -18,8 +18,11 @@ from dataclasses import asdict, dataclass, field
 from ..languages.python_ast import parse_python
 from ..models import Confidence, Finding, Severity
 from ..rules.catalog import CATALOG
-from .ollama_client import LLMUnavailable, OllamaClient
+from .ollama_client import LLMUnavailable, OllamaClient, default_client
 from .prompts import (
+    FUNCTION_SCHEMA,
+    FUNCTION_SYSTEM,
+    FUNCTION_USER,
     FIX_RETRY_SCHEMA,
     FIX_RETRY_USER,
     SEMANTIC_SCHEMA,
@@ -51,6 +54,7 @@ class AIAnalysis:
     source: str = "llm"                # llm | knowledge_base
     model: str = ""
     notes: list[str] = field(default_factory=list)
+    rag_documents: list[str] = field(default_factory=list)  # ids da base usados no prompt (RAG)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -198,7 +202,8 @@ def validate_fix(
 
 class AITriage:
     def __init__(self, client: OllamaClient | None = None, cache: dict | None = None):
-        self.client = client or OllamaClient()
+        self.client = client or default_client()
+        self.use_rag = client is None or getattr(client, "use_rag", False)
         self.cache = cache if cache is not None else {}
 
     def _cache_key(self, finding: Finding, context: str) -> str:
@@ -219,17 +224,23 @@ class AITriage:
             trace = "- Fluxo de dados detectado (taint):\n" + "\n".join(
                 f"    linha {s.line}: {s.description}" for s in finding.trace
             )
+        rag_text, rag_ids = ("", [])
+        if self.use_rag:
+            from .rag import rag_context
+
+            rag_text, rag_ids = rag_context(finding, getattr(self.client, "base_url", None))
         prompt = TRIAGE_USER.format(
             rule_id=finding.rule_id, title=finding.title, cwe=finding.cwe, owasp=finding.owasp,
             severity=finding.severity.name, confidence=finding.confidence.name, message=finding.message,
             file=finding.file, line=finding.line, trace=trace,
             description=meta.description if meta else "", language=finding.language, context=context,
-        )
+        ) + (f"\n\n{rag_text}" if rag_text else "")
         self._current_source = enclosing_function(source, finding.line) or finding.snippet
         self._ctx = (source if source and source != finding.snippet else None, project_files)
         try:
             raw = self.client.chat_json(TRIAGE_SYSTEM, prompt, TRIAGE_SCHEMA)
             analysis = self._apply_guardrails(finding, raw)
+            analysis.rag_documents = rag_ids
         except (LLMUnavailable, KeyError, ValueError, TypeError) as exc:
             return knowledge_base_analysis(finding, f"LLM indisponível ou resposta inválida: {exc}")
 
@@ -304,15 +315,34 @@ class AITriage:
         )
 
     # --------------------------------------------------- varredura semântica
-    def semantic_review(self, path: str, source: str, language: str = "python") -> list[Finding]:
-        """Pede ao LLM falhas de lógica (IDOR, autorização ausente...) que regras não capturam."""
-        numbered = "\n".join(f"{i:4} | {l}" for i, l in enumerate(source.splitlines(), 1))
+    def semantic_review(
+        self, path: str, source: str, language: str = "python", known: list[Finding] | None = None,
+    ) -> list[Finding]:
+        """Pede ao LLM falhas de LÓGICA (IDOR, autorização ausente...) que regras não capturam.
+
+        - Comentários são removidos antes do envio: o modelo julga só o código (e não pode
+          "colar" de anotações como as do benchmark).
+        - Os achados que o motor já tem são informados ao modelo e, se ele repetir algum
+          mesmo assim, o achado é descartado (mesmo arquivo, até 2 linhas de distância).
+        """
+        known = [f for f in (known or []) if f.file == path]
+        if language == "python":
+            per_function = self._semantic_by_function(path, source, known)
+            if per_function is not None:
+                return per_function
+        code = strip_comments(source, language)
+        numbered = "\n".join(f"{i:4} | {l}" for i, l in enumerate(code.splitlines(), 1))
+        already = "\n".join(f"- linha {f.line}: {f.rule_id} {f.title}" for f in known) or "- nenhum"
         try:
-            raw = self.client.chat_json(SEMANTIC_SYSTEM, SEMANTIC_USER.format(file=path, language=language, code=numbered), SEMANTIC_SCHEMA)
+            raw = self.client.chat_json(
+                SEMANTIC_SYSTEM,
+                SEMANTIC_USER.format(file=path, language=language, code=numbered, known=already),
+                SEMANTIC_SCHEMA,
+            )
         except LLMUnavailable:
             return []
         lines = source.splitlines()
-        findings = []
+        findings: list[Finding] = []
         for issue in raw.get("issues", []):
             try:
                 line = int(issue["line"])
@@ -320,8 +350,10 @@ class AITriage:
                 severity = Severity.parse(issue["severity"])
             except (KeyError, ValueError, TypeError):
                 continue
-            if not 1 <= line <= len(lines) or conf < 0.6:
-                continue  # descarta linhas inexistentes (alucinação) e baixa confiança
+            if not 1 <= line <= len(lines) or not lines[line - 1].strip() or conf < 0.6:
+                continue  # linha inexistente/vazia (alucinação) ou baixa confiança
+            if any(abs(f.line - line) <= 2 for f in known + findings):
+                continue  # repetição de achado já conhecido
             findings.append(Finding(
                 rule_id="AI-SEMANTIC",
                 title=str(issue.get("title", "Falha lógica"))[:120],
@@ -334,3 +366,113 @@ class AITriage:
             ))
         return findings
 
+    def _semantic_by_function(self, path: str, source: str, known: list[Finding]) -> list[Finding] | None:
+        """Para cada função de rota (achada pela AST), o LLM responde perguntas objetivas e o
+        código converte as respostas em achados com CWE. Retorna None se não houver rotas."""
+        from ..taint import ROUTE_DECORATORS
+
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return None
+        routes = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for dec in node.decorator_list:
+                    target = dec.func if isinstance(dec, ast.Call) else dec
+                    if isinstance(target, ast.Attribute) and target.attr in ROUTE_DECORATORS:
+                        routes.append(node)
+                        break
+        if not routes:
+            return None
+        lines = source.splitlines()
+        findings: list[Finding] = []
+        for fn in routes:
+            start = fn.decorator_list[0].lineno if fn.decorator_list else fn.lineno
+            code = strip_comments("\n".join(lines[start - 1 : fn.end_lineno]))
+            try:
+                ans = self.client.chat_json(FUNCTION_SYSTEM, FUNCTION_USER.format(file=path, language="python", code=code), FUNCTION_SCHEMA)
+            except LLMUnavailable:
+                return findings
+            if not isinstance(ans, dict):
+                continue
+            why = str(ans.get("explanation", ""))
+            # Checagem cruzada: "altera dados" só vale com evidência na AST (o LLM às vezes afirma
+            # isso de funções que só leem, como um GET que abre um arquivo).
+            if ans.get("modifies_data") and not _mutates(fn):
+                ans["modifies_data"] = False
+            issues = []
+            if ans.get("accesses_resource_by_id") and not ans.get("checks_resource_owner"):
+                issues.append(("CWE-639", "Acesso a recurso de outro usuário (IDOR)", Severity.HIGH,
+                               f"{fn.name}() acessa um registro pelo id recebido sem conferir se ele pertence ao usuário logado.",
+                               "Filtrar pelo dono: buscar o registro com o id E o usuário da sessão, ou retornar 403."))
+            if ans.get("modifies_data") and not ans.get("requires_authentication"):
+                issues.append(("CWE-306", "Operação sensível sem autenticação", Severity.HIGH,
+                               f"{fn.name}() altera dados sem verificar se há um usuário autenticado.",
+                               "Exigir login (decorator ou checagem da sessão) antes de alterar dados."))
+            if ans.get("trusts_client_sensitive_value"):
+                value = str(ans.get("sensitive_value", "")).strip()
+                issues.append(("CWE-602", "Valor sensível controlado pelo cliente", Severity.MEDIUM,
+                               f"{fn.name}() confia em um valor enviado pelo cliente{f' ({value})' if value else ''} que deveria ser decidido no servidor.",
+                               "Calcular o valor no servidor (preço, desconto, papel, usuário da sessão); nunca aceitá-lo do cliente."))
+            for cwe, title, severity, message, fix in issues:
+                if any(f.cwe == cwe and f.file == path and fn.lineno <= f.line <= fn.end_lineno for f in known):
+                    continue
+                findings.append(Finding(
+                    rule_id="AI-SEMANTIC", title=title, message=f"{message} {why}".strip(), file=path,
+                    line=fn.lineno, end_line=fn.end_lineno, severity=severity, confidence=Confidence.LOW,
+                    cwe=cwe, owasp="A01:2021 - Broken Access Control" if cwe != "CWE-602" else "A04:2021 - Insecure Design",
+                    snippet=lines[fn.lineno - 1].strip(), engine=f"ai/{self.client.model}", language="python",
+                    remediation=fix,
+                ))
+        return findings
+
+
+MUTATING_METHODS = {"post", "put", "patch", "delete"}
+MUTATING_CALL = ("save", "salvar", "delete", "apagar", "remove", "remover", "update", "atualizar",
+                 "commit", "cancel", "cancelar", "insert", "inserir", "destroy", "excluir")
+
+
+def _mutates(fn: ast.AST) -> bool:
+    """Evidência sintática de que a rota altera estado."""
+    for dec in getattr(fn, "decorator_list", []):
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        if isinstance(target, ast.Attribute) and target.attr in MUTATING_METHODS:
+            return True
+        if isinstance(dec, ast.Call):
+            for kw in dec.keywords:
+                if kw.arg == "methods" and any(
+                    isinstance(e, ast.Constant) and str(e.value).lower() in MUTATING_METHODS
+                    for e in ast.walk(kw.value)
+                ):
+                    return True
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if name.lower().startswith(MUTATING_CALL):
+                return True
+        if isinstance(node, (ast.Assign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, (ast.Attribute, ast.Subscript)) for t in targets):
+                return True
+    return False
+
+
+def strip_comments(source: str, language: str = "python") -> str:
+    """Remove comentários preservando a numeração das linhas."""
+    if language == "python":
+        import io
+        import tokenize
+
+        lines = source.splitlines()
+        try:
+            for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+                if tok.type == tokenize.COMMENT:
+                    row, col = tok.start
+                    lines[row - 1] = lines[row - 1][:col].rstrip()
+        except (tokenize.TokenError, IndentationError, SyntaxError):
+            return source
+        return "\n".join(lines)
+    import re
+
+    return "\n".join(re.sub(r"\s*//(?![^'\"`]*['\"`]).*$", "", l) for l in source.splitlines())
