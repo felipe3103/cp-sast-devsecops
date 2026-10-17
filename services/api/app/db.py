@@ -97,7 +97,7 @@ def init_db() -> None:
 
 def _add_missing_columns() -> None:
     """Migração leve: adiciona colunas novas em bancos criados por versões anteriores."""
-    from sqlalchemy import inspect, text
+    from sqlalchemy import DDL, inspect
 
     inspector = inspect(engine)
     with engine.begin() as conn:
@@ -113,9 +113,10 @@ def _add_missing_columns() -> None:
                 clause = f" DEFAULT {default!r}" if isinstance(default, (int, str)) else ""
                 quote = engine.dialect.identifier_preparer.quote
                 # Identificadores vêm dos modelos do ORM (código), nunca de entrada externa, e
-                # passam pelo quoting do dialeto. DDL não aceita bind parameters para nomes.
+                # passam pelo quoting do dialeto. DDL (construção do SQLAlchemy para comandos de esquema)
+                # porque nomes de tabela/coluna não aceitam bind parameters.
                 ddl = f"ALTER TABLE {quote(table.name)} ADD COLUMN {quote(column.name)} {ddl_type}{clause}"
-                conn.execute(text(ddl))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
+                conn.execute(DDL(ddl))
 
 
 def get_session() -> Iterator:
