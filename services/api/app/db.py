@@ -111,7 +111,11 @@ def _add_missing_columns() -> None:
                 ddl_type = column.type.compile(dialect=engine.dialect)
                 default = column.default.arg if column.default is not None and not callable(column.default.arg) else None
                 clause = f" DEFAULT {default!r}" if isinstance(default, (int, str)) else ""
-                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl_type}{clause}'))
+                quote = engine.dialect.identifier_preparer.quote
+                # Identificadores vêm dos modelos do ORM (código), nunca de entrada externa, e
+                # passam pelo quoting do dialeto. DDL não aceita bind parameters para nomes.
+                ddl = f"ALTER TABLE {quote(table.name)} ADD COLUMN {quote(column.name)} {ddl_type}{clause}"
+                conn.execute(text(ddl))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
 
 
 def get_session() -> Iterator:
