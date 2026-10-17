@@ -58,6 +58,10 @@ SEMANTIC_USER = """Arquivo: {file}
 ```{language}
 {code}
 ```
+A ferramenta SAST JÁ detectou os problemas abaixo. NÃO os repita; procure apenas falhas de lógica
+diferentes (ex.: um recurso acessado por id sem verificar se pertence ao usuário logado):
+{known}
+
 Retorne JSON: {{"issues": [{{"line": <int>, "title": <str>, "cwe": "CWE-<n>", "severity": "CRITICAL|HIGH|MEDIUM|LOW",
 "confidence": <0-1>, "explanation": <str>, "remediation": <str>}}]}}. Lista vazia se não houver problemas."""
 
@@ -100,4 +104,35 @@ FIX_RETRY_SCHEMA = {
     "type": "object",
     "properties": {"fixed_code": {"type": "string"}},
     "required": ["fixed_code"],
+}
+
+# Varredura semântica por função: perguntas objetivas que até modelos pequenos respondem bem.
+FUNCTION_SYSTEM = """Você é um revisor de segurança de APIs web. Responda sobre UMA função de rota,
+olhando só o código dado. Responda SOMENTE com JSON válido, em português do Brasil."""
+
+FUNCTION_USER = """Função de rota (arquivo {file}):
+```{language}
+{code}
+```
+Responda cada pergunta com true/false olhando o código:
+- requires_authentication: a função verifica se há usuário logado (sessão, token, decorator de login) antes de agir?
+- accesses_resource_by_id: busca, altera ou apaga um registro usando um id vindo da URL, da query ou do corpo?
+- checks_resource_owner: compara o dono do registro com o usuário logado da sessão (ex.: pedido.usuario_id == session['usuario_id'])?
+- modifies_data: altera, cancela, apaga ou salva dados?
+- trusts_client_sensitive_value: usa um valor de preço, desconto, papel, permissão ou id de usuário enviado pelo cliente em vez de calcular/obter no servidor?
+Também informe sensitive_value (qual valor, se houver) e explanation (1-2 frases)."""
+
+FUNCTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "requires_authentication": {"type": "boolean"},
+        "accesses_resource_by_id": {"type": "boolean"},
+        "checks_resource_owner": {"type": "boolean"},
+        "modifies_data": {"type": "boolean"},
+        "trusts_client_sensitive_value": {"type": "boolean"},
+        "sensitive_value": {"type": "string"},
+        "explanation": {"type": "string"},
+    },
+    "required": ["requires_authentication", "accesses_resource_by_id", "checks_resource_owner",
+                 "modifies_data", "trusts_client_sensitive_value", "explanation"],
 }

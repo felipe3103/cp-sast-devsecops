@@ -241,7 +241,9 @@ def scan_ai(scan_id: int, limit: int = Query(15, le=100), session: Session = Dep
 
 @app.post("/api/v1/scans/{scan_id}/semantic", status_code=202)
 def scan_semantic(scan_id: int, session: Session = Depends(get_session)) -> dict:
-    _get_scan(session, scan_id)
+    scan = _get_scan(session, scan_id)
+    scan.semantic_status = "running"
+    session.commit()
     semantic_review_task.delay(scan_id)
     return {"queued": True}
 

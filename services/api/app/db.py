@@ -42,6 +42,8 @@ class Scan(Base):
     gate_failed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     gate_reason: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str] = mapped_column(Text, default="")
+    semantic_status: Mapped[str] = mapped_column(String(20), default="none")  # none|running|done
+    semantic_found: Mapped[int] = mapped_column(Integer, default=0)
     project: Mapped[Project] = relationship(back_populates="scans")
     findings: Mapped[list["FindingRow"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
     files: Mapped[list["ScanFile"]] = relationship(cascade="all, delete-orphan")
@@ -90,6 +92,26 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Migração leve: adiciona colunas novas em bancos criados por versões anteriores."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                ddl_type = column.type.compile(dialect=engine.dialect)
+                default = column.default.arg if column.default is not None and not callable(column.default.arg) else None
+                clause = f" DEFAULT {default!r}" if isinstance(default, (int, str)) else ""
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl_type}{clause}'))
 
 
 def get_session() -> Iterator:

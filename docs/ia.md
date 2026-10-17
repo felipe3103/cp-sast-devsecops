@@ -1,13 +1,24 @@
 # Módulo de IA (LLM local)
 
-Código: `sast_engine/ai/` · Modelo padrão: **Llama 3 via Ollama** (`OLLAMA_MODEL`, `OLLAMA_URL`).
+Código: `sast_engine/ai/` · Modelo padrão: **Llama 3 via Ollama** (`OLLAMA_MODEL`, `OLLAMA_URL`) · Orquestração: **LangChain** · Embeddings do RAG: **Hugging Face Hub**.
+
+## Stack de IA (as três tecnologias recomendadas no PDF)
+
+| Tecnologia | Papel |
+|---|---|
+| **Ollama + Llama 3** | LLM local (8B testado; 3.2 3B em máquinas com 8 GB). O código não sai da máquina. |
+| **LangChain** | chain `ChatPromptTemplate → ChatOllama(format=JSON Schema) → JsonOutputParser` (`LangChainOllamaClient`, padrão `AI_BACKEND=langchain`) e **RAG** com `InMemoryVectorStore` + `OllamaEmbeddings` (`sast_engine/ai/rag.py`) |
+| **Hugging Face** | o modelo de embeddings do RAG, `nomic-ai/nomic-embed-text-v1.5`, é baixado do **Hugging Face Hub** (`ollama pull hf.co/nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0`), com os prefixos `search_document:`/`search_query:` indicados no model card |
+
+### RAG
+A base de conhecimento é o próprio catálogo do motor: as 31 regras (descrição, remediação, exemplo seguro, CWE/OWASP) e os CVEs reais por CWE. Na triagem, os 3 documentos mais parecidos com o achado entram no prompt, e os ids usados ficam registrados em `rag_documents`, para auditoria. Exemplo real: para o SQLi interprocedural foram recuperados `TAINT-SQLI`, `CVE-2014-3704` (Drupalgeddon) e `PY005`; para `yaml.load`, `CVE-2017-18342` (PyYAML). Sem LangChain ou sem o modelo de embeddings, a triagem segue sem RAG (`AI_RAG=0` desliga).
 
 ## O que a IA faz
 
 | Função | Entrada | Saída |
 |---|---|---|
 | **Triagem** (`AITriage.analyze`) | achado + 25 linhas de contexto + caminho do taint + descrição da CWE | veredito (verdadeiro/falso positivo/incerto), confiança, severidade real, justificativa, cenário de exploração, remediação e **código corrigido** |
-| **Varredura semântica** (`AITriage.semantic_review`) | arquivo inteiro numerado | falhas de **lógica** que regras não pegam: IDOR, autorização ausente, vazamento em logs, regra de negócio insegura |
+| **Varredura semântica** (`AITriage.semantic_review`) | cada **função de rota** (achada pela AST), sem comentários | falhas de **lógica** que regras não pegam: IDOR (CWE-639), operação sem autenticação (CWE-306), valor sensível decidido pelo cliente (CWE-602) |
 
 Por que LLM **local**? O código-fonte da empresa nunca sai da rede, sem custo por token e sem depender de API externa (requisito de privacidade e propriedade intelectual).
 
@@ -32,7 +43,11 @@ LLMs alucinam, por isso a resposta do modelo nunca é aplicada às cegas:
    - não pode **introduzir** um achado novo (≥ MEDIUM) na região alterada.
    Exemplo: se a IA "corrigir" `os.system("ls " + c)` para `os.system("ls " + c.strip())`, o re-scan ainda acusa PY003 e a correção é marcada como **não validada**.
 5b. **Autocorreção guiada pelo validador:** quando a correção é rejeitada, o erro exato (ex.: "ainda dispara TAINT-SQLI na linha 18") volta para o LLM, que tem até 2 novas tentativas.
-6. **Varredura semântica:** linhas inexistentes (alucinação) são descartadas, confiança < 0,6 é ignorada e a severidade fica limitada a HIGH. Esses achados nunca entram como CRITICAL sem um humano.
+6. **Varredura semântica, desenho anti-alucinação:**
+   - **comentários são removidos** antes do envio (o modelo não pode "colar" de anotações como as do benchmark);
+   - em vez de uma pergunta aberta ("ache falhas de lógica", que o Llama 3 respondeu com lista vazia no teste real), o motor acha as **rotas pela AST** e faz ao LLM **perguntas objetivas por função**: exige autenticação? busca registro por id? confere o dono? altera dados? confia em valor do cliente? O **código** converte as respostas em achados com CWE;
+   - **checagem cruzada com a AST:** "altera dados" só vale com evidência sintática (POST/PUT/DELETE, `save()`/`delete()`, atribuição a atributo). Isso eliminou falsos positivos reais em que o LLM afirmou que um GET de leitura alterava dados;
+   - achados que repetem algo que o motor já tem são descartados; os achados entram com **confiança LOW** (indício para revisão humana) e **não bloqueiam o Security Gate** sozinhos.
 7. **Cache** por hash (modelo + regra + contexto): o mesmo trecho não é reenviado ao LLM.
 
 Achados suprimidos pela IA ficam visíveis no dashboard (status `false_positive`, com a justificativa) e **não bloqueiam o gate**. Ou seja, a IA reduz o ruído sem apagar evidência.
@@ -54,7 +69,31 @@ No dashboard: abra um achado e clique em **"Analisar com IA"**, ou use **"Triage
 
 `tests/test_ai.py` usa um cliente Ollama simulado para provar cada guardrail de forma determinística: correção válida aceita, correção ainda vulnerável rejeitada, correção que não compila rejeitada, severidade limitada, supressão por confiança, proteção do fluxo de taint, fallback offline, cache e descarte de linhas alucinadas.
 
-## Resultados com o LLM real (Llama 3.2 3B, Mac com 8 GB de RAM)
+## Resultados com o Llama 3 8B (LangChain + RAG)
+
+Execução real, Mac com 8 GB de RAM (Ollama nativo com GPU Metal). Triagem de 6 achados em ~15 min e varredura semântica de 4 rotas em ~70 s.
+
+**Triagem** (`--ai --ai-limit 6` em `samples/vulnerable_app`):
+
+| Achado | Veredito | Correção | RAG recuperou |
+|---|---|---|---|
+| `TAINT-SQLI` app.py:30 | verdadeiro positivo (0,9) | consulta parametrizada, **validada** | TAINT-SQLI, CVE-2014-3704, PY005 |
+| `TAINT-CODE` app.py:62 | verdadeiro positivo (0,9) | mapa de operações permitidas, **validada** | TAINT-CODE |
+| `TAINT-DESER` app.py:102 | verdadeiro positivo (0,9) | `json.loads`, **validada** | TAINT-DESER, PY004 |
+| `TAINT-DESER` app.py:108 | verdadeiro positivo (0,9) | `yaml.safe_load`, **validada** | CVE-2017-18342 |
+| `TAINT-CMDI` app.py:48 | verdadeiro positivo (0,9) | **rejeitada**: não compilava em nenhuma das 3 tentativas | CVE-2014-6271 (Shellshock) |
+| `TAINT-CMDI` app.py:55 | verdadeiro positivo (0,9) | **rejeitada**: `str(destino)` não sanitiza; o re-scan do projeto acusou TAINT-CMDI | CVE-2014-6271 |
+
+Classificação: 6/6 corretos. Correções: 4/6 validadas; as 2 erradas foram barradas pelo validador, nenhuma correção errada foi exibida como válida.
+
+**Varredura semântica** (`--ai-semantic`):
+
+| Arquivo | Resultado |
+|---|---|
+| `vulnerable_app/pedidos.py` (5 falhas de lógica plantadas, comentários removidos antes do envio) | **4 de 5 encontradas**: IDOR e falta de autenticação em `cancelar_pedido`, desconto definido pelo cliente, exclusão de conta pelo id do corpo. Não encontrou o IDOR de `ver_pedido`. |
+| `safe_app/app.py` | 2 alertas, ambos defensáveis: `backup()` aceita do cliente o destino e `importar_config()` aceita POST sem login (a app segura corrigiu as falhas de regra, mas não tem autenticação). A versão sem checagem cruzada dava mais 2 alertas falsos em rotas GET de leitura. |
+
+## Resultados com o Llama 3.2 3B (primeiros testes)
 
 | Achado | Veredito da IA | Correção |
 |---|---|---|

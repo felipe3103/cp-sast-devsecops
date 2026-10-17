@@ -6,7 +6,7 @@ Workflow: `.github/workflows/devsecops.yml` (executa em `push` na `main`, em tod
 
 | Job | Controle | Bloqueia? |
 |---|---|---|
-| `tests` | 80 testes pytest + benchmark com **precisão e recall ≥ 90%** | sim |
+| `tests` | 107 testes pytest + benchmark com **precisão e recall ≥ 90%** | sim |
 | `sast` | **SentinelaSAST** no repositório: SARIF no Code Scanning, relatório como comentário no PR e no Job Summary, envio opcional ao dashboard | sim, achado **novo** HIGH+ com confiança ≥ MEDIUM |
 | `gate-demo` | prova que o gate **reprova** `samples/vulnerable_app` e **aprova** `samples/safe_app` | sim |
 | `bandit` | Bandit em severidade ≥ MEDIUM no código da plataforma | sim |
@@ -60,3 +60,10 @@ Com isso, o botão de merge fica desabilitado enquanto o Security Gate estiver v
 ## Dogfooding
 
 A própria plataforma passa nos seus controles: SentinelaSAST (0 achados ≥ MEDIUM fora das exceções documentadas), Bandit (`-ll` limpo) e Semgrep. Dois alertas legítimos do Bandit (`urlopen` aceitando qualquer esquema) foram **corrigidos** com validação http/https (`require_http_url`), em vez de simplesmente silenciados.
+
+## GitLab CI
+
+`.gitlab-ci.yml` reproduz os mesmos controles: testes + benchmark, SentinelaSAST com baseline do branch alvo do MR, prova do gate, Bandit, Semgrep, pip-audit, build e Trivy (Docker-in-Docker).
+
+- O relatório `gl-sast-report.json` (`--format gitlab`) segue o **schema oficial GitLab SAST 15.0.7**, validado com `jsonschema` contra o arquivo publicado pelo GitLab. Declarado em `artifacts:reports:sast`, aparece no widget de segurança do Merge Request.
+- Para bloquear MRs: *Settings → Merge requests → Pipelines must succeed*.

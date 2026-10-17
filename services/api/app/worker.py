@@ -71,4 +71,14 @@ def triage_finding_task(finding_id: int):
 def semantic_review_task(scan_id: int):
     with SessionLocal() as session:
         scan = session.get(Scan, scan_id)
-        return services.semantic_review_scan(session, scan) if scan else 0
+        if scan is None:
+            return 0
+        try:
+            return services.semantic_review_scan(session, scan)
+        except Exception as exc:
+            session.rollback()
+            scan = session.get(Scan, scan_id)
+            scan.semantic_status = "failed"
+            scan.error = f"varredura semântica: {exc}"[:1000]
+            session.commit()
+            return 0

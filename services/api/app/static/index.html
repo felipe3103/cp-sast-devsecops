@@ -54,6 +54,12 @@
   </section>
 
   <section class="card">
+    <h2>Falhas detectadas <span class="badge">casos reais</span></h2>
+    <p class="hint">Incidentes conhecidos (CVE) da mesma classe de falha (CWE) encontrada no seu código: o impacto real do que está aberto.</p>
+    <div id="cve-list" class="cve-list"></div>
+  </section>
+
+  <section class="card">
     <div class="row">
       <h2>Achados <span id="scan-label" class="muted"></span></h2>
       <div class="row gap">
@@ -70,6 +76,7 @@
           <option value="fixed">Corrigidos</option>
         </select>
         <button id="btn-ai-all" class="secondary">Triagem IA (top 15)</button>
+        <button id="btn-semantic" class="secondary" title="O LLM procura falhas de lógica (IDOR, autorização) que as regras não pegam">Varredura semântica (IA)</button>
         <a id="btn-sarif" class="button ghost" href="#">SARIF</a>
       </div>
     </div>

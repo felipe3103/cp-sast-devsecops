@@ -11,6 +11,11 @@
 
 ### JavaScript (`sast_engine/languages/javascript_ts.py`)
 - **Tree-sitter** gera a árvore sintática concreta e as regras JS consultam os tipos de nó (`call_expression`, `assignment_expression`, `template_string`...).
+- **Taint analysis JS** (`_JSTaint`):
+  - **fontes:** `req.query/body/params/headers/cookies` (Express/Koa), `location.search/hash`, `document.cookie/URL`, `process.argv`;
+  - **sinks:** `eval`/`Function`/`setTimeout(string)`, `exec`, `query()` com SQL, `res.send`/`innerHTML`/`document.write`, `fs.readFile`/`res.sendFile`, `fetch`/`axios`/`http.get`, `res.redirect`;
+  - **sanitizadores:** `parseInt`, `Number`, `encodeURIComponent`, `DOMPurify.sanitize`, `path.basename`, `validator.escape`;
+  - suporta desestruturação (`const { id } = req.query`) e reatribuição limpa. É intraprocedural.
 - É opcional: se o Tree-sitter não estiver instalado, o motor segue só com Python.
 
 ## 2. Catálogo de regras
@@ -46,6 +51,7 @@
 | TAINT-XSS | taint | HIGH | 79 | A03 | entrada → `render_template_string`, `Markup`, HTML retornado pela rota |
 | TAINT-REDIRECT | taint | MEDIUM | 601 | A01 | entrada → `redirect` |
 | JS001–JS005 | Tree-sitter | MEDIUM–HIGH | 95/79/798/78/89 | A03/A07 | `eval`, `innerHTML`, segredos, `child_process.exec`, SQL concatenado |
+| TAINT-* (JS) | taint/Tree-sitter | igual ao Python | idem | idem | os mesmos 7 tipos de fluxo, em Express e no navegador |
 
 As três **violações iniciais do CP1** são `PY001`, `PY002` e `PY003`.
 
@@ -107,9 +113,10 @@ O Security Gate usa `--min-confidence` para decidir se achados MEDIUM bloqueiam.
 `benchmark/run_benchmark.py` compara os achados com as anotações `# expect: REGRA` das amostras:
 - `samples/vulnerable_app`: 4 arquivos Flask com 36 vulnerabilidades, incluindo fluxos entre arquivos;
 - `samples/safe_app`: as **mesmas funcionalidades corrigidas**, onde qualquer achado é falso positivo;
-- `samples/js_app`: 9 vulnerabilidades JS.
+- `samples/js_app`: 15 vulnerabilidades JS (regras + taint), incluindo casos seguros na mesma rota;
+- `samples/vulnerable_app/pedidos.py`: falhas de **lógica** sem anotação (nenhuma regra deve disparar; alvo da varredura semântica por IA).
 
-Ele também roda uma **ablação** sem taint, para medir a contribuição desse módulo: F1 cai de 1,0 para 0,756. O CI exige precisão e recall ≥ 90%.
+Ele também roda uma **ablação** sem taint, para medir a contribuição desse módulo: F1 cai de 1,0 para 0,63. O CI exige precisão e recall ≥ 90%.
 
 ## Limitações conhecidas
 
@@ -117,5 +124,5 @@ Ele também roda uma **ablação** sem taint, para medir a contribuição desse 
 - **Funções de bibliotecas externas** são tratadas de forma conservadora (propagam taint), o que pode gerar falso positivo. A IA ajuda na triagem desses casos.
 - **Chamadas dinâmicas** (`getattr`, `**kwargs` repassados, decorators que trocam a função) não são resolvidas.
 - **Guardas** reconhecem padrões comuns, não condições arbitrárias.
-- **JavaScript** tem só regras estruturais, sem taint.
+- **Taint em JavaScript** é intraprocedural (não segue o dado entre funções/módulos) e não distingue escopos de variáveis com o mesmo nome.
 - O benchmark é pequeno e foi escrito pelo grupo. O próximo passo natural é medir contra um corpus independente, como o **OWASP Benchmark** (Java) ou projetos Python intencionalmente vulneráveis com licença aberta.

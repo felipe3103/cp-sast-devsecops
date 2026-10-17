@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from sast_engine.ai import AITriage
 from sast_engine.gate import GatePolicy, evaluate
 from sast_engine.models import Finding, ScanResult, Severity
+from sast_engine.rules.catalog import reference_cves
 from sast_engine.scanner import LANG_BY_EXT, ScanConfig, collect_files, scan_sources
 
 from .config import settings
@@ -122,9 +123,10 @@ def persist_result(session: Session, scan: Scan, result: ScanResult, files: dict
             status="false_positive" if f.extra.get("ai_suppressed") else "open",
         ))
     if files:
-        for path in {f.file for f in result.findings}:
-            if path in files:
-                session.add(ScanFile(scan_id=scan.id, path=path, content=files[path]))
+        # guarda todos os arquivos analisados (contexto para IA, validação de correções e
+        # varredura semântica, que procura falhas justamente onde as regras não acharam nada)
+        for path, content in files.items():
+            session.add(ScanFile(scan_id=scan.id, path=path, content=content))
     scan.status = "completed"
     scan.finished_at = utcnow()
 
@@ -173,10 +175,10 @@ def triage_finding(session: Session, row: FindingRow, triage: AITriage | None = 
 def semantic_review_scan(session: Session, scan: Scan, triage: AITriage | None = None) -> int:
     triage = triage or AITriage()
     created = 0
+    existing = [row_to_finding(r) for r in scan.findings]
     for file_row in scan.files:
-        if not file_row.path.endswith(".py"):
-            continue
-        for f in triage.semantic_review(file_row.path, file_row.content):
+        language = "python" if file_row.path.endswith(".py") else "javascript"
+        for f in triage.semantic_review(file_row.path, file_row.content, language, existing):
             data = f.to_dict()
             session.add(FindingRow(
                 scan_id=scan.id, fingerprint=data["fingerprint"], rule_id=f.rule_id, title=f.title,
@@ -185,6 +187,10 @@ def semantic_review_scan(session: Session, scan: Scan, triage: AITriage | None =
                 remediation=f.remediation, risk_score=f.risk_score, trace=[],
             ))
             created += 1
+            counts = dict(scan.counts or {})
+            counts[f.severity.name] = counts.get(f.severity.name, 0) + 1
+            scan.counts = counts
+    scan.semantic_status, scan.semantic_found = "done", created
     session.commit()
     return created
 
@@ -201,6 +207,7 @@ def finding_to_dict(row: FindingRow, with_ai: bool = True) -> dict:
     }
     if with_ai:
         data["ai"] = row.ai
+        data["reference_cves"] = [vars(r) for r in reference_cves(row.cwe)]
     return data
 
 
@@ -212,6 +219,7 @@ def scan_to_dict(scan: Scan) -> dict:
         "files_scanned": scan.files_scanned, "lines_scanned": scan.lines_scanned,
         "duration_ms": scan.duration_ms, "counts": scan.counts or {}, "gate_failed": scan.gate_failed,
         "gate_reason": scan.gate_reason, "error": scan.error,
+        "semantic_status": scan.semantic_status, "semantic_found": scan.semantic_found,
     }
 
 
@@ -280,6 +288,11 @@ def compute_metrics(session: Session, project: str | None = None) -> dict:
         "owasp": owasp.most_common(),
         "cwe": cwe.most_common(10),
         "engines": dict(engines),
+        # "Falhas detectadas": incidentes reais da mesma classe das falhas encontradas no código
+        "reference_cves": [
+            {"cwe": cwe_id, "findings": n, "cve": ref.cve, "title": ref.title, "description": ref.description}
+            for cwe_id, n in cwe.most_common() for ref in reference_cves(cwe_id)
+        ],
         "latest_scans": [scan_to_dict(s) for s in sorted(latest.values(), key=lambda s: s.created_at, reverse=True)],
     }
 

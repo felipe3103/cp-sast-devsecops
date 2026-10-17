@@ -1,0 +1,90 @@
+# Pipeline DevSecOps para GitLab CI (equivalente ao .github/workflows/devsecops.yml).
+# Para bloquear Merge Requests: Settings > Merge requests > "Pipelines must succeed".
+stages: [test, security, build, gate]
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+default:
+  image: python:3.12-slim
+  cache:
+    paths: [.cache/pip]
+
+testes:
+  stage: test
+  script:
+    - pip install -r requirements-dev.txt
+    - python -m pytest --junitxml=junit.xml
+    - python benchmark/run_benchmark.py --json benchmark.json --min-precision 0.9 --min-recall 0.9
+  artifacts:
+    when: always
+    reports: { junit: junit.xml }
+    paths: [benchmark.json]
+
+sentinela-sast:
+  stage: security
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - pip install tree-sitter==0.26.0 tree-sitter-javascript==0.25.0
+  script:
+    # Em Merge Requests, só achados NOVOS (fora da branch alvo) reprovam.
+    - |
+      BASELINE=""
+      if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+        git fetch --depth=50 origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        git worktree add /tmp/base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        python -m sast_engine scan /tmp/base --format json -o /tmp/baseline.json || true
+        [ -f /tmp/baseline.json ] && BASELINE="--baseline /tmp/baseline.json"
+      fi
+      python -m sast_engine scan . --fail-on high --min-confidence medium $BASELINE \
+        --format json -o sast-report.json \
+        --also gitlab=gl-sast-report.json --also sarif=sast-report.sarif --also markdown=sast-report.md
+  artifacts:
+    when: always
+    reports: { sast: gl-sast-report.json }   # widget de segurança do MR
+    paths: [sast-report.json, sast-report.sarif, sast-report.md]
+
+gate-demo:
+  stage: security
+  script:
+    # (não usar "! comando": com set -e um comando negado nunca derruba o job)
+    - |
+      if python -m sast_engine scan samples/vulnerable_app --fail-on high > /dev/null; then
+        echo "O gate deveria ter reprovado samples/vulnerable_app"; exit 1
+      fi
+    - python -m sast_engine scan samples/safe_app --fail-on high
+
+bandit:
+  stage: security
+  script:
+    - pip install bandit==1.9.4
+    - bandit -r sast_engine services benchmark scripts -ll
+
+semgrep:
+  stage: security
+  image: semgrep/semgrep:latest
+  script:
+    - semgrep scan --config rules/semgrep --exclude samples --exclude tests --error --metrics=off
+
+dependencias:
+  stage: security
+  script:
+    - pip install pip-audit
+    - pip-audit -r requirements.txt --strict
+
+imagem:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
+  script:
+    - docker build -t sentinela-sast:$CI_COMMIT_SHORT_SHA .
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image
+        --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 sentinela-sast:$CI_COMMIT_SHORT_SHA
+
+security-gate:
+  stage: gate
+  script:
+    - echo "Todos os controles de segurança passaram - Security Gate aprovado."
