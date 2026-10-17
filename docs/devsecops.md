@@ -6,7 +6,7 @@ Workflow: `.github/workflows/devsecops.yml` (executa em `push` na `main`, em tod
 
 | Job | Controle | Bloqueia? |
 |---|---|---|
-| `tests` | 75 testes pytest + benchmark com **precisão e recall ≥ 90%** | sim |
+| `tests` | 80 testes pytest + benchmark com **precisão e recall ≥ 90%** | sim |
 | `sast` | **SentinelaSAST** no repositório: SARIF no Code Scanning, relatório como comentário no PR e no Job Summary, envio opcional ao dashboard | sim, achado **novo** HIGH+ com confiança ≥ MEDIUM |
 | `gate-demo` | prova que o gate **reprova** `samples/vulnerable_app` e **aprova** `samples/safe_app` | sim |
 | `bandit` | Bandit em severidade ≥ MEDIUM no código da plataforma | sim |

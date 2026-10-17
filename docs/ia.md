@@ -28,8 +28,10 @@ LLMs alucinam, por isso a resposta do modelo nunca é aplicada às cegas:
 4. **Supressão só com confiança ≥ 0,8.** Abaixo disso também vai para revisão humana.
 5. **Validação da correção em ciclo fechado:** o `fixed_code` sugerido
    - precisa **compilar** (`ast.parse`);
-   - é **re-escaneado pelo próprio motor** e não pode disparar a mesma regra/CWE.
+   - é **aplicado no arquivo real** (substitui a função inteira ou a instrução do achado) e o **projeto inteiro é re-escaneado**. Assim a taint analysis entre arquivos também é verificada: uma "correção" de SQLi que continua concatenando a entrada no SQL é rejeitada mesmo que a fonte (`request.args`) esteja em outro arquivo;
+   - não pode **introduzir** um achado novo (≥ MEDIUM) na região alterada.
    Exemplo: se a IA "corrigir" `os.system("ls " + c)` para `os.system("ls " + c.strip())`, o re-scan ainda acusa PY003 e a correção é marcada como **não validada**.
+5b. **Autocorreção guiada pelo validador:** quando a correção é rejeitada, o erro exato (ex.: "ainda dispara TAINT-SQLI na linha 18") volta para o LLM, que tem até 2 novas tentativas.
 6. **Varredura semântica:** linhas inexistentes (alucinação) são descartadas, confiança < 0,6 é ignorada e a severidade fica limitada a HIGH. Esses achados nunca entram como CRITICAL sem um humano.
 7. **Cache** por hash (modelo + regra + contexto): o mesmo trecho não é reenviado ao LLM.
 
@@ -51,3 +53,18 @@ No dashboard: abra um achado e clique em **"Analisar com IA"**, ou use **"Triage
 ## Testes
 
 `tests/test_ai.py` usa um cliente Ollama simulado para provar cada guardrail de forma determinística: correção válida aceita, correção ainda vulnerável rejeitada, correção que não compila rejeitada, severidade limitada, supressão por confiança, proteção do fluxo de taint, fallback offline, cache e descarte de linhas alucinadas.
+
+## Resultados com o LLM real (Llama 3.2 3B, Mac com 8 GB de RAM)
+
+| Achado | Veredito da IA | Correção |
+|---|---|---|
+| `PY001` `app.secret_key = "..."` | verdadeiro positivo (0,9) | `os.environ['APP_SECRET_KEY']`, **validada** |
+| `PY001` chave AWS em `config.py` | verdadeiro positivo (0,9) | `os.environ['AWS_ACCESS_KEY_ID']`, **validada** |
+| `TAINT-DESER` `yaml.load(request.data)` | verdadeiro positivo (0,9) | troca por JSON, **validada** |
+| `TAINT-SQLI` interprocedural `db.py:18` | verdadeiro positivo (0,9) | **rejeitada** nas 3 tentativas: o modelo continuou concatenando a entrada no SQL, e o re-scan do projeto mostrou `TAINT-SQLI` |
+
+Lições aprendidas com o teste real:
+- A primeira versão do validador re-escaneava só o trecho isolado e **aceitou** uma correção de SQLi ainda vulnerável, porque sem a fonte no trecho o taint não tinha o que rastrear. Isso motivou a validação no projeto inteiro.
+- O modelo pequeno truncava o código em `sql =`. Com a saída restrita por JSON Schema, uma aspa dupla sem escape fecha a string do JSON. Pedir aspas simples no código resolveu.
+- A correção `os.environ.get('APP_SECRET_KEY', 'default_value')` passou na primeira versão. Criamos uma detecção para segredo literal usado como valor padrão de `getenv`.
+- Modelos de 3B acertam bem a **classificação**, mas erram correções que exigem refatorar mais de uma função. Com mais memória, use `OLLAMA_MODEL=llama3` (8B). O validador continua impedindo que uma correção errada seja exibida como válida.

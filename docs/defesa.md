@@ -35,7 +35,7 @@ python -m sast_engine scan samples/vulnerable_app --fail-on high; echo "exit=$?"
 ```
 
 5. **Dashboard** (<http://localhost:8000>): KPIs → tendência caindo ao longo das sprints → clicar no top arquivo → abrir `TAINT-SQLI db.py:18` → mostrar o fluxo → **"Analisar com IA"** → mostrar o veredito e a correção validada.
-6. **GitHub:** abrir um PR que adiciona `os.system(request.args["c"])` → mostrar o check *Security Gate* vermelho, o comentário do relatório e o alerta no Code Scanning.
+6. **GitHub:** mostrar o **PR #1** (já aberto): o check *Security Gate* vermelho, o comentário do relatório, o alerta `TAINT-CMDI` no Code Scanning e o botão de merge bloqueado.
 
 > Plano B: se o Ollama estiver lento na hora, a triagem cai para a base de conhecimento e o fluxo continua. Vale mostrar isso também, porque é o guardrail 1.
 
@@ -77,7 +77,7 @@ De três formas: a `safe_app`, que implementa as mesmas funções de forma corre
 É, porque foi escrito por nós, e assumimos isso. Por isso mostramos a ablação (contribuição do taint) e os casos negativos. Como próximo passo, rodaríamos contra corpora independentes.
 
 **E se o LLM alucinar uma correção?**
-Ela precisa compilar e é re-escaneada. Se ainda dispara a regra, é marcada como não validada (há teste para isso). O LLM também não pode mudar a severidade em mais de um nível nem suprimir um fluxo de taint comprovado.
+Ela é aplicada no arquivo e o projeto inteiro é re-escaneado. Se a vulnerabilidade continuar, ou se surgir outra, a correção é rejeitada e o erro volta para o LLM tentar de novo. No teste real, o Llama 3.2 3B errou a correção do SQLi interprocedural três vezes e o validador barrou todas (ver `docs/ia.md`). O LLM também não pode mudar a severidade em mais de um nível nem suprimir um fluxo de taint comprovado.
 
 **E se o Ollama cair no meio do pipeline?**
 O sistema cai para a base de conhecimento do catálogo. A IA nunca é ponto único de falha do gate.
