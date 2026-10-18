@@ -42,6 +42,7 @@ LLMs alucinam, por isso a resposta do modelo nunca é aplicada às cegas:
    - é **aplicado no arquivo real** (substitui a função inteira ou a instrução do achado) e o **projeto inteiro é re-escaneado**. Assim a taint analysis entre arquivos também é verificada: uma "correção" de SQLi que continua concatenando a entrada no SQL é rejeitada mesmo que a fonte (`request.args`) esteja em outro arquivo;
    - não pode **introduzir** um achado novo (≥ MEDIUM) na região alterada.
    Exemplo: se a IA "corrigir" `os.system("ls " + c)` para `os.system("ls " + c.strip())`, o re-scan ainda acusa PY003 e a correção é marcada como **não validada**.
+5a. **A correção precisa preservar o comportamento:** no teste real, o modelo de 3B propôs `query = f` para um SQL Injection, o que "eliminava" a falha apagando a consulta. Agora a correção é rejeitada se deixar de definir as variáveis do trecho original, se remover a chamada (a operação deve continuar, só que de forma segura) ou se remover o valor de retorno. Limitação assumida: o validador não executa o código, então um erro de API (ex.: `conn.fetchall()` numa conexão sqlite3) não é detectado.
 5b. **Autocorreção guiada pelo validador:** quando a correção é rejeitada, o erro exato (ex.: "ainda dispara TAINT-SQLI na linha 18") volta para o LLM, que tem até 2 novas tentativas.
 6. **Varredura semântica, desenho anti-alucinação:**
    - **comentários são removidos** antes do envio (o modelo não pode "colar" de anotações como as do benchmark);

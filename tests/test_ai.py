@@ -146,3 +146,21 @@ def test_fix_that_introduces_new_vulnerability_is_rejected():
     piora = 'import subprocess\ndef f(c):\n    subprocess.run(["ls", c], check=True)\n    eval(c)'
     ok, note = validate_fix(finding(), piora, VULN, {})
     assert ok is False and "introduz PY002" in note
+
+
+def test_fix_that_deletes_functionality_is_rejected():
+    """Visto com o LLM real: `query = f` "eliminava" o SQLi apagando a consulta."""
+    from sast_engine.ai.triage import validate_fix
+    src = "from flask import request\nimport sqlite3\ndef u():\n    query = 'SELECT ' + request.args['n']\n    rows = sqlite3.connect('x').execute(query).fetchall()\n    return rows\n"
+    sqli = next(f for f in scan_sources({"a.py": src}).findings if f.rule_id == "TAINT-SQLI")
+    ok, note = validate_fix(sqli, "query = f", src, {"a.py": src})
+    assert ok is False and "remove a operação original" in note
+    ok, note = validate_fix(sqli, "rows = sqlite3.connect('x').execute('SELECT ?', (request.args['n'],)).fetchall()", src, {"a.py": src})
+    assert ok is True, note
+
+
+def test_fix_must_keep_return_value():
+    from sast_engine.ai.triage import preserves_behavior
+    src = "def f(c):\n    return eval(c)\n"
+    assert preserves_behavior(src, 2, "def f(c):\n    pass")[0] is False
+    assert preserves_behavior(src, 2, "def f(c):\n    return ast.literal_eval(c)")[0] is True

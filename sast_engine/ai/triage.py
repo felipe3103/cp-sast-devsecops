@@ -118,29 +118,86 @@ def _innermost(tree: ast.AST, line: int, types: tuple) -> ast.AST | None:
     return best
 
 
-def apply_fix(source: str, line: int, fixed_code: str) -> tuple[str, int, int] | None:
-    """Aplica a correção no arquivo real: substitui a função inteira (se o LLM devolveu a
-    função) ou a instrução da linha do achado. Retorna (código novo, linha inicial, linha final)."""
-    try:
-        tree = ast.parse(source)
-        fixed_tree = ast.parse(fixed_code)
-    except SyntaxError:
-        return None
-    lines = source.splitlines()
+def _target_region(tree: ast.AST, line: int, fixed_tree: ast.AST) -> tuple[ast.AST, int, int, int] | None:
+    """Trecho do arquivo que a correção substitui: a função inteira (se o LLM devolveu a
+    função) ou a instrução da linha do achado. Retorna (nó original, início, fim, indentação)."""
     func = _innermost(tree, line, (ast.FunctionDef, ast.AsyncFunctionDef))
     fixed_defs = [n for n in fixed_tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
     if func is not None and any(d.name == func.name for d in fixed_defs):
         has_decorators = any(d.decorator_list for d in fixed_defs if d.name == func.name)
         first = func.decorator_list[0].lineno if (func.decorator_list and has_decorators) else func.lineno
-        target_start, target_end, indent = first, func.end_lineno, func.col_offset
-    else:
-        stmt = _innermost(tree, line, (ast.stmt,))
-        if stmt is None:
-            return None
-        target_start, target_end, indent = stmt.lineno, stmt.end_lineno, stmt.col_offset
+        return func, first, func.end_lineno, func.col_offset
+    stmt = _innermost(tree, line, (ast.stmt,))
+    if stmt is None:
+        return None
+    return stmt, stmt.lineno, stmt.end_lineno, stmt.col_offset
+
+
+def apply_fix(source: str, line: int, fixed_code: str) -> tuple[str, int, int] | None:
+    """Aplica a correção no arquivo real. Retorna (código novo, linha inicial, linha final)."""
+    try:
+        tree = ast.parse(source)
+        fixed_tree = ast.parse(fixed_code)
+    except SyntaxError:
+        return None
+    region = _target_region(tree, line, fixed_tree)
+    if region is None:
+        return None
+    _, target_start, target_end, indent = region
+    lines = source.splitlines()
     replacement = [(" " * indent + l) if l.strip() else l for l in fixed_code.splitlines()]
     patched = lines[: target_start - 1] + replacement + lines[target_end:]
     return "\n".join(patched) + "\n", target_start, target_start + len(replacement) - 1
+
+
+def _assigned_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for n in ast.walk(node):
+        if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+            for t in targets:
+                names |= {x.id for x in ast.walk(t) if isinstance(x, ast.Name)}
+        elif isinstance(n, (ast.With, ast.AsyncWith)):
+            for item in n.items:
+                if item.optional_vars is not None:
+                    names |= {x.id for x in ast.walk(item.optional_vars) if isinstance(x, ast.Name)}
+    return names
+
+
+def preserves_behavior(source: str, line: int, fixed_code: str) -> tuple[bool, str]:
+    """Uma correção não pode "eliminar" a falha apagando a funcionalidade.
+
+    Exige que o trecho corrigido ainda defina as mesmas variáveis, ainda faça uma chamada
+    (a operação original, ou uma equivalente segura) e ainda retorne um valor, se o original
+    retornava. Ex.: trocar `rows = conn.execute(q).fetchall()` por `query = f` é rejeitado.
+    """
+    try:
+        tree, fixed_tree = ast.parse(source), ast.parse(fixed_code)
+    except SyntaxError:
+        return True, ""  # a compilação é checada em outro passo
+    region = _target_region(tree, line, fixed_tree)
+    if region is None:
+        return True, ""
+    original = region[0]
+    # numa instrução, as variáveis definidas precisam continuar definidas; numa função
+    # reescrita inteira, variáveis intermediárias podem sumir legitimamente
+    is_function = isinstance(original, (ast.FunctionDef, ast.AsyncFunctionDef))
+    missing = set() if is_function else _assigned_names(original) - _assigned_names(fixed_tree)
+    if missing:
+        return False, f"a correção remove a operação original ('{sorted(missing)[0]}' deixa de ser definido)"
+
+    def has_call(node: ast.AST) -> bool:
+        return any(isinstance(n, ast.Call) for n in ast.walk(node))
+
+    if has_call(original) and not has_call(fixed_tree):
+        return False, "a correção remove a chamada original em vez de torná-la segura"
+
+    def returns_value(node: ast.AST) -> bool:
+        return any(isinstance(n, ast.Return) and n.value is not None for n in ast.walk(node))
+
+    if returns_value(original) and not returns_value(fixed_tree):
+        return False, "a correção remove o valor de retorno do código original"
+    return True, ""
 
 
 def validate_fix(
@@ -176,6 +233,9 @@ def validate_fix(
             return False, f"a correção ainda dispara {remaining[0].rule_id}: {remaining[0].message}"
         return True, "correção compila e não dispara mais a regra (validada isoladamente)"
 
+    keeps, why = preserves_behavior(source, finding.line, code)
+    if not keeps:
+        return False, why
     applied = apply_fix(source, finding.line, code)
     if applied is None:
         return None, "não foi possível aplicar a correção no arquivo"
