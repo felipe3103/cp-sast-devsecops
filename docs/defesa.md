@@ -4,16 +4,17 @@
 
 Os pesos da avaliação guiam o tempo: Arquitetura 25% · **Robustez SAST 30%** · Inovação IA 20% · DevSecOps 15% · Defesa 10%.
 
-## Divisão sugerida (4–5 integrantes)
+## Divisão da apresentação
 
-| Bloco | Tempo | Quem | Conteúdo |
-|---|---|---|---|
-| 1. Problema e shift-left | 1,5 min | Integrante 1 | Custo de corrigir em produção × no commit; o que é SAST |
-| 2. Arquitetura | 3 min | Integrante 2 | C4 nível 2 (containers), duas filas Celery, ADRs 2–6, segurança da própria plataforma |
-| 3. Motor SAST + taint | 4 min | Integrante 3 | AST, catálogo CWE/OWASP, **demo do trace entre arquivos**, benchmark e ablação |
-| 4. IA | 3 min | Integrante 4 | LLM local, schema, **guardrails**, correção re-escaneada |
-| 5. DevSecOps + dashboard | 2,5 min | Integrante 5 | Pipeline, baseline, PR bloqueado, dashboard |
-| 6. Análise crítica | 1 min | Integrante 1 | Limitações e próximos passos |
+| Bloco | Tempo | Quem | Slides | Conteúdo |
+|---|---|---|---|---|
+| 1. Problema e arquitetura | 4,5 min | **Felipe Braunstein e Silva** (RM554483) | 1–3 | Shift-left e SAST; C4 nível 2 (containers), duas filas Celery, ADRs, segurança da própria plataforma |
+| 2. Motor SAST + taint | 4 min | **Felipe do Nascimento Fernandes** (RM554598) | 4–6 | AST, catálogo CWE/OWASP, **demo do trace entre arquivos**, benchmark e ablação |
+| 3. IA | 3 min | **Henrique Ignacio Bartalo** (RM555274) | 7–8 | LLM local, LangChain/RAG/Hugging Face, **guardrails**, resultados reais com Llama 3, varredura semântica |
+| 4. DevSecOps, dashboard e análise crítica | 3,5 min | **Gustavo Henrique Martins** (RM556956) | 9–11 | Pipeline, PR #1 bloqueado, dashboard ao vivo, limitações e próximos passos |
+| Perguntas | — | todos | 12 | ver respostas abaixo |
+
+As notas de cada slide indicam quem apresenta.
 
 ## Roteiro de demonstração (ensaiar!)
 

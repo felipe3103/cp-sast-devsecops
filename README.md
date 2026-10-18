@@ -2,6 +2,15 @@
 
 Projeto Integrador · Engenharia de Software (3º ano) · FIAP 2026 · Prof. M.Sc. Oerton Fernandes
 
+**Integrantes**
+
+| Nome | RM |
+|---|---|
+| Felipe Braunstein e Silva | RM554483 |
+| Felipe do Nascimento Fernandes | RM554598 |
+| Henrique Ignacio Bartalo | RM555274 |
+| Gustavo Henrique Martins | RM556956 |
+
 O SentinelaSAST é uma plataforma de **Static Application Security Testing** que analisa código-fonte sem executá-lo, encontra vulnerabilidades (OWASP Top 10 / CWE), usa um **LLM local (Ollama + Llama 3)** para triagem e sugestão de correção e bloqueia Pull Requests inseguros por meio de **Security Gates** no GitHub Actions.
 
 **Linguagem alvo escolhida: Python** (AST + taint analysis interprocedural). O motor é multilinguagem: **JavaScript via Tree-sitter**, também com regras e taint analysis.
