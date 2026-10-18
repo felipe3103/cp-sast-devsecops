@@ -4,17 +4,16 @@
 
 Os pesos da avaliação guiam o tempo: Arquitetura 25% · **Robustez SAST 30%** · Inovação IA 20% · DevSecOps 15% · Defesa 10%.
 
-## Divisão da apresentação
+## Divisão da apresentação (10 slides)
 
-| Bloco | Tempo | Quem | Slides | Conteúdo |
-|---|---|---|---|---|
-| 1. Problema e arquitetura | 4,5 min | **Felipe Braunstein e Silva** (RM554483) | 1–3 | Shift-left e SAST; C4 nível 2 (containers), duas filas Celery, ADRs, segurança da própria plataforma |
-| 2. Motor SAST + taint | 4 min | **Felipe do Nascimento Fernandes** (RM554598) | 4–6 | AST, catálogo CWE/OWASP, **demo do trace entre arquivos**, benchmark e ablação |
-| 3. IA | 3 min | **Henrique Ignacio Bartalo** (RM555274) | 7–8 | LLM local, LangChain/RAG/Hugging Face, **guardrails**, resultados reais com Llama 3, varredura semântica |
-| 4. DevSecOps, dashboard e análise crítica | 3,5 min | **Gustavo Henrique Martins** (RM556956) | 9–11 | Pipeline, PR #1 bloqueado, dashboard ao vivo, limitações e próximos passos |
-| Perguntas | — | todos | 12 | ver respostas abaixo |
+| Quem | Slides | Conteúdo | Demo ao vivo |
+|---|---|---|---|
+| **Felipe Braunstein e Silva** (RM554483) | 1–3 | Abertura, problema (shift-left), arquitetura | — |
+| **Felipe do Nascimento Fernandes** (RM554598) | 4–5 | Motor + taint analysis, precisão medida | terminal: trace do `db.py:18` |
+| **Henrique Ignacio Bartalo** (RM555274) | 6–7 | IA local, guardrails, resultados reais com Llama 3 | — |
+| **Gustavo Henrique Martins** (RM556956) | 8–10 | Security Gate (PR #1), dashboard, análise crítica e encerramento | PR #1 no GitHub; dashboard |
 
-As notas de cada slide indicam quem apresenta.
+O texto falado de cada slide está nas notas do apresentador.
 
 ## Roteiro de demonstração (ensaiar!)
 
