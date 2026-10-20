@@ -79,8 +79,8 @@ def require_token(x_api_token: str = Header(default="")) -> None:
         raise HTTPException(401, "token inválido")
 
 
-def _enqueue_scan(session: Session, project: str, source: str, ref: str, **task_kwargs) -> Scan:
-    scan = Scan(project=services.get_or_create_project(session, project), source=source, ref=ref[:300])
+def _enqueue_scan(session: Session, project: str, source: str, label: str, **task_kwargs) -> Scan:
+    scan = Scan(project=services.get_or_create_project(session, project), source=source, ref=label[:300])
     session.add(scan)
     session.commit()
     run_scan.delay(scan.id, **task_kwargs)

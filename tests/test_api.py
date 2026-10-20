@@ -79,6 +79,15 @@ def test_git_host_not_allowed(client):
     assert r.status_code == 400
 
 
+def test_git_scan_enqueued(client, monkeypatch):
+    from app import services
+    monkeypatch.setattr(services, "clone_repository", lambda url, ref=None: {"app.py": "eval(input())"})
+    r = client.post("/api/v1/scans/git", json={"repo_url": "https://github.com/dono/repo", "ref": "main"})
+    assert r.status_code == 202
+    scan = client.get(f"/api/v1/scans/{r.json()['id']}").json()
+    assert scan["ref"] == "https://github.com/dono/repo@main" and scan["status"] == "completed"
+
+
 def test_ci_ingestion_requires_token(client):
     payload = {"project": "ci", "ref": "main@abc", "summary": {"files_scanned": 1}, "findings": []}
     assert client.post("/api/v1/scans/ci", json=payload).status_code == 401
